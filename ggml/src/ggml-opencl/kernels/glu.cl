@@ -138,27 +138,27 @@ kernel void kernel_reglu_f16(
 //------------------------------------------------------------------------------
 // swiglu
 //------------------------------------------------------------------------------
-kernel void kernel_swiglu(
-    global char * src0,
-    ulong  offset0,
-    global char * src1,
-    ulong  offset1,
-    global char * dst,
-    ulong  offsetd,
-    ulong nb01,
-    ulong nb11,
+__kernel void kernel_swiglu(
+    __global char * src0,
+    unsigned long  offset0,
+    __global char * src1,
+    unsigned long  offset1,
+    __global char * dst,
+    unsigned long  offsetd,
+    unsigned long nb01,
+    unsigned long nb11,
     int ne0,
-    ulong nb1,
+    unsigned long nb1,
     int ne00_off,
     int ne10_off
 ) {
-    src0 = (global char*)((global char*)src0 + offset0);
-    src1 = (global char*)((global char*)src1 + offset1);
-    dst  = (global char*)((global char*)dst  + offsetd);
+    src0 = (__global char*)((__global char*)src0 + offset0);
+    src1 = (__global char*)((__global char*)src1 + offset1);
+    dst  = (__global char*)((__global char*)dst  + offsetd);
 
-    global float * src0_row = (global float *) ((global char *) src0 + get_group_id(0)*nb01) + ne00_off;
-    global float * src1_row = (global float *) ((global char *) src1 + get_group_id(0)*nb11) + ne10_off;
-    global float * dst_row  = (global float *) ((global char *) dst  + get_group_id(0)*nb1);
+    __global float * src0_row = (__global float *) ((__global char *) src0 + get_group_id(0)*nb01) + ne00_off;
+    __global float * src1_row = (__global float *) ((__global char *) src1 + get_group_id(0)*nb11) + ne10_off;
+    __global float * dst_row  = (__global float *) ((__global char *) dst  + get_group_id(0)*nb1);
 
     for (int i0 = get_local_id(0); i0 < ne0; i0 += get_local_size(0)) {
         const float x0 = src0_row[i0];
