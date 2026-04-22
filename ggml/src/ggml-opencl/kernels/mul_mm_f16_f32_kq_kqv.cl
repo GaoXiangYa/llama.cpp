@@ -200,74 +200,74 @@ __kernel void mul_mm_f16_f32_kq(
         int nb01
 ) {
 
-    uint block_id_m = get_global_id(1);
-    uint block_id_n = get_global_id(2) % ((N+TILESIZE_N-1)/TILESIZE_N);
-    uint block_id_d = get_global_id(2) / ((N+TILESIZE_N-1)/TILESIZE_N);
+//     uint block_id_m = get_global_id(1);
+//     uint block_id_n = get_global_id(2) % ((N+TILESIZE_N-1)/TILESIZE_N);
+//     uint block_id_d = get_global_id(2) / ((N+TILESIZE_N-1)/TILESIZE_N);
 
-    __private float16  regA;
-    __private float8   regB;
-    __private float16 regC0;
-    __private float16 regC1;
+//     __private float16  regA;
+//     __private float8   regB;
+//     __private float16 regC0;
+//     __private float16 regC1;
 
-    const uint col   = block_id_m * TILESIZE_M;
-    const uint row   = block_id_n * TILESIZE_N;
-    const uint depth_A = block_id_d / (D_B/D_A);
-    const uint depth_B = block_id_d;
+//     const uint col   = block_id_m * TILESIZE_M;
+//     const uint row   = block_id_n * TILESIZE_N;
+//     const uint depth_A = block_id_d / (D_B/D_A);
+//     const uint depth_B = block_id_d;
 
-#ifdef KQV
-    int line_stride_matrix_A_in_bytes = nb01 * M;
-    int line_stride_matrix_B_in_bytes = K * N * 4;
-#else
-    int line_stride_matrix_A_in_bytes = K * D_A * 2;
-    int line_stride_matrix_B_in_bytes = K * D_B * 4;
-#endif
+// #ifdef KQV
+//     int line_stride_matrix_A_in_bytes = nb01 * M;
+//     int line_stride_matrix_B_in_bytes = K * N * 4;
+// #else
+//     int line_stride_matrix_A_in_bytes = K * D_A * 2;
+//     int line_stride_matrix_B_in_bytes = K * D_B * 4;
+// #endif
 
-    int line_stride_matrix_C_in_bytes = M * 4;
+//     int line_stride_matrix_C_in_bytes = M * 4;
 
-    const uint strideAinElements = line_stride_matrix_A_in_bytes / 2;
-    const uint strideBinElements = line_stride_matrix_B_in_bytes / 4;
+//     const uint strideAinElements = line_stride_matrix_A_in_bytes / 2;
+//     const uint strideBinElements = line_stride_matrix_B_in_bytes / 4;
 
-    size_t sub_block_id_m = get_local_id(0);
+//     size_t sub_block_id_m = get_local_id(0);
 
-    uint b_localOffsetInWords = (sub_block_id_m/16)*16
-                           + ((((sub_block_id_m)>>0)&1)<<2)
-                           + ((((sub_block_id_m)>>1)&1)<<3)
-                           + ((((sub_block_id_m)>>2)&1)<<0)
-                           + ((((sub_block_id_m)>>3)&1)<<1);
+//     uint b_localOffsetInWords = (sub_block_id_m/16)*16
+//                            + ((((sub_block_id_m)>>0)&1)<<2)
+//                            + ((((sub_block_id_m)>>1)&1)<<3)
+//                            + ((((sub_block_id_m)>>2)&1)<<0)
+//                            + ((((sub_block_id_m)>>3)&1)<<1);
 
-    uint2 b_globalOffsetInWords_xy = {((sub_block_id_m%4)*4), (sub_block_id_m>>2)};
-    uint b_globalOffsetInWords00, b_globalOffsetInWords16;
-#ifdef KQV
-    b_globalOffsetInWords00 = b_globalOffsetInWords_xy.x + b_globalOffsetInWords_xy.y*K;
-    b_globalOffsetInWords16 = b_globalOffsetInWords00 + (16 * K);
-    uint subMatrixAStartInElements = depth_A * strideAinElements + col * nb01 / 2;
-    uint subMatrixBStartInElements = depth_B * strideBinElements + row * K;
-#else
-    b_globalOffsetInWords00 = b_globalOffsetInWords_xy.x + b_globalOffsetInWords_xy.y*line_stride_matrix_B_in_bytes/4;
-    b_globalOffsetInWords16 = b_globalOffsetInWords00 + (16 * line_stride_matrix_B_in_bytes/4);
-    uint subMatrixAStartInElements = col * strideAinElements + depth_A * K;
-    uint subMatrixBStartInElements = row * strideBinElements + depth_B * K;
-#endif
+//     uint2 b_globalOffsetInWords_xy = {((sub_block_id_m%4)*4), (sub_block_id_m>>2)};
+//     uint b_globalOffsetInWords00, b_globalOffsetInWords16;
+// #ifdef KQV
+//     b_globalOffsetInWords00 = b_globalOffsetInWords_xy.x + b_globalOffsetInWords_xy.y*K;
+//     b_globalOffsetInWords16 = b_globalOffsetInWords00 + (16 * K);
+//     uint subMatrixAStartInElements = depth_A * strideAinElements + col * nb01 / 2;
+//     uint subMatrixBStartInElements = depth_B * strideBinElements + row * K;
+// #else
+//     b_globalOffsetInWords00 = b_globalOffsetInWords_xy.x + b_globalOffsetInWords_xy.y*line_stride_matrix_B_in_bytes/4;
+//     b_globalOffsetInWords16 = b_globalOffsetInWords00 + (16 * line_stride_matrix_B_in_bytes/4);
+//     uint subMatrixAStartInElements = col * strideAinElements + depth_A * K;
+//     uint subMatrixBStartInElements = row * strideBinElements + depth_B * K;
+// #endif
 
-    __local float matrix_B_local[1024];
+//     __local float matrix_B_local[1024];
 
-    for (uint step=0; step < K; step+=TILESIZE_K) {
-        size_t sub_block_id_m = get_local_id(0);
-        regA = mm_load_a(matrix_A, subMatrixAStartInElements, nb01, line_stride_matrix_A_in_bytes);
+//     for (uint step=0; step < K; step+=TILESIZE_K) {
+//         size_t sub_block_id_m = get_local_id(0);
+//         regA = mm_load_a(matrix_A, subMatrixAStartInElements, nb01, line_stride_matrix_A_in_bytes);
 
-        uint b_coordInWords00 = subMatrixBStartInElements + b_globalOffsetInWords00;
-        uint b_coordInWords16 = subMatrixBStartInElements + b_globalOffsetInWords16;
+//         uint b_coordInWords00 = subMatrixBStartInElements + b_globalOffsetInWords00;
+//         uint b_coordInWords16 = subMatrixBStartInElements + b_globalOffsetInWords16;
 
-        regB.s0123 = vload4(b_coordInWords00/4, matrix_B);
-        regB.s4567 = vload4(b_coordInWords16/4, matrix_B);
+//         regB.s0123 = vload4(b_coordInWords00/4, matrix_B);
+//         regB.s4567 = vload4(b_coordInWords16/4, matrix_B);
 
-        mm_mad(matrix_B_local, regA, regB, b_localOffsetInWords, &regC0, &regC1);
+//         mm_mad(matrix_B_local, regA, regB, b_localOffsetInWords, &regC0, &regC1);
 
-        subMatrixAStartInElements += TILESIZE_K;
-        subMatrixBStartInElements += TILESIZE_K;
-    }
+//         subMatrixAStartInElements += TILESIZE_K;
+//         subMatrixBStartInElements += TILESIZE_K;
+//     }
 
-    uint subMatrixCStartInElements = depth_B * N * M + row * M + col;
-    mm_store_c_N(matrix_C, regC0, regC1, subMatrixCStartInElements, line_stride_matrix_C_in_bytes, (N-block_id_n*32));
+//     uint subMatrixCStartInElements = depth_B * N * M + row * M + col;
+//     mm_store_c_N(matrix_C, regC0, regC1, subMatrixCStartInElements, line_stride_matrix_C_in_bytes, (N-block_id_n*32));
 }
 

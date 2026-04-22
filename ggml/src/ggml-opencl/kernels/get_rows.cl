@@ -23,36 +23,36 @@ struct block_q4_0
 // dequantize_q4_0_f32, dequantize_q4_0_f16
 //------------------------------------------------------------------------------
 void dequantize_q4_0_f32(global struct block_q4_0 * xb, short il, float16 * reg) {
-    global ushort * qs = ((global ushort *)xb + 1);
-    float d1 = il ? (xb->d / 16.h) : xb->d;
-    float d2 = d1 / 256.f;
-    float md = -8.h * xb->d;
-    ushort mask0 = il ? 0x00F0 : 0x000F;
-    ushort mask1 = mask0 << 8;
+    // global ushort * qs = ((global ushort *)xb + 1);
+    // float d1 = il ? (xb->d / 16.h) : xb->d;
+    // float d2 = d1 / 256.f;
+    // float md = -8.h * xb->d;
+    // ushort mask0 = il ? 0x00F0 : 0x000F;
+    // ushort mask1 = mask0 << 8;
 
-    reg->s0 = d1 * (qs[0] & mask0) + md;
-    reg->s1 = d2 * (qs[0] & mask1) + md;
+    // reg->s0 = d1 * (qs[0] & mask0) + md;
+    // reg->s1 = d2 * (qs[0] & mask1) + md;
 
-    reg->s2 = d1 * (qs[1] & mask0) + md;
-    reg->s3 = d2 * (qs[1] & mask1) + md;
+    // reg->s2 = d1 * (qs[1] & mask0) + md;
+    // reg->s3 = d2 * (qs[1] & mask1) + md;
 
-    reg->s4 = d1 * (qs[2] & mask0) + md;
-    reg->s5 = d2 * (qs[2] & mask1) + md;
+    // reg->s4 = d1 * (qs[2] & mask0) + md;
+    // reg->s5 = d2 * (qs[2] & mask1) + md;
 
-    reg->s6 = d1 * (qs[3] & mask0) + md;
-    reg->s7 = d2 * (qs[3] & mask1) + md;
+    // reg->s6 = d1 * (qs[3] & mask0) + md;
+    // reg->s7 = d2 * (qs[3] & mask1) + md;
 
-    reg->s8 = d1 * (qs[4] & mask0) + md;
-    reg->s9 = d2 * (qs[4] & mask1) + md;
+    // reg->s8 = d1 * (qs[4] & mask0) + md;
+    // reg->s9 = d2 * (qs[4] & mask1) + md;
 
-    reg->sa = d1 * (qs[5] & mask0) + md;
-    reg->sb = d2 * (qs[5] & mask1) + md;
+    // reg->sa = d1 * (qs[5] & mask0) + md;
+    // reg->sb = d2 * (qs[5] & mask1) + md;
 
-    reg->sc = d1 * (qs[6] & mask0) + md;
-    reg->sd = d2 * (qs[6] & mask1) + md;
+    // reg->sc = d1 * (qs[6] & mask0) + md;
+    // reg->sd = d2 * (qs[6] & mask1) + md;
 
-    reg->se = d1 * (qs[7] & mask0) + md;
-    reg->sf = d2 * (qs[7] & mask1) + md;
+    // reg->se = d1 * (qs[7] & mask0) + md;
+    // reg->sf = d2 * (qs[7] & mask1) + md;
 }
 
 

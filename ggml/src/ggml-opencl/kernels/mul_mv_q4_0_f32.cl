@@ -97,69 +97,69 @@ inline void mul_vec_q_n_f32(
         int r3
 ) {
 
-    const ulong nb = ne00/QK4_0;
+    // const ulong nb = ne00/QK4_0;
 
-    int r0 = get_group_id(0);
-    int r1 = get_group_id(1);
-    int im = get_group_id(2);
+    // int r0 = get_group_id(0);
+    // int r1 = get_group_id(1);
+    // int im = get_group_id(2);
 
-    // (r0 * N_SIMDGROUP + get_sub_group_id()) is essenatially the linear global
-    // id of a SIMD group in the grid.
-    int first_row = (r0 * N_SIMDGROUP + get_sub_group_id()) * N_DST;
+    // // (r0 * N_SIMDGROUP + get_sub_group_id()) is essenatially the linear global
+    // // id of a SIMD group in the grid.
+    // int first_row = (r0 * N_SIMDGROUP + get_sub_group_id()) * N_DST;
 
-    int i12 = im%ne12;
-    int i13 = im/ne12;
+    // int i12 = im%ne12;
+    // int i13 = im/ne12;
 
-    ulong offset0 = first_row * nb + (i12/r2)*(nb*ne01) + (i13/r3)*(nb*ne01*ne02);
+    // ulong offset0 = first_row * nb + (i12/r2)*(nb*ne01) + (i13/r3)*(nb*ne01*ne02);
 
-    global struct block_q4_0 * x = (global struct block_q4_0 *) src0 + offset0;
-    global float             * y = (global float             *) src1 + r1*ne10 + im*ne00*ne1;
+    // global struct block_q4_0 * x = (global struct block_q4_0 *) src0 + offset0;
+    // global float             * y = (global float             *) src1 + r1*ne10 + im*ne00*ne1;
 
-    float yl[16];       // src1 vector cache
-    float sumf[N_DST]={0.f};
+    // float yl[16];       // src1 vector cache
+    // float sumf[N_DST]={0.f};
 
-    int ix = get_sub_group_local_id()/2;
-    int il = 8*(get_sub_group_local_id()%2);
+    // int ix = get_sub_group_local_id()/2;
+    // int il = 8*(get_sub_group_local_id()%2);
 
-    global float * yb = y + ix * QK4_0 + il;
+    // global float * yb = y + ix * QK4_0 + il;
 
-    // each thread in a SIMD group deals with half a block.
-    for (int ib = ix; ib < nb; ib += N_SIMDWIDTH/2) {
-        float sumy = 0;
-        for (int i = 0; i < 8; i += 2) {
-            sumy += yb[i] + yb[i+1];
-            yl[i+0] = yb[i+ 0];
-            yl[i+1] = yb[i+ 1]/256.f;
-            sumy += yb[i+16] + yb[i+17];
-            yl[i+8] = yb[i+16]/16.f;
-            yl[i+9] = yb[i+17]/4096.f;
-        }
+    // // each thread in a SIMD group deals with half a block.
+    // for (int ib = ix; ib < nb; ib += N_SIMDWIDTH/2) {
+    //     float sumy = 0;
+    //     for (int i = 0; i < 8; i += 2) {
+    //         sumy += yb[i] + yb[i+1];
+    //         yl[i+0] = yb[i+ 0];
+    //         yl[i+1] = yb[i+ 1]/256.f;
+    //         sumy += yb[i+16] + yb[i+17];
+    //         yl[i+8] = yb[i+16]/16.f;
+    //         yl[i+9] = yb[i+17]/4096.f;
+    //     }
 
-        for (int row = 0; row < N_DST; row++) {
-            sumf[row] += block_q_4_0_dot_y(x+ib+row*nb, sumy, yl, il);
-        }
+    //     for (int row = 0; row < N_DST; row++) {
+    //         sumf[row] += block_q_4_0_dot_y(x+ib+row*nb, sumy, yl, il);
+    //     }
 
-        // One thread in a SIMD group (i.e., subgroup) handles a half block,
-        // hence then entire SIMD group handles SIMDWIDTH/2 blocks.
-        // y points to the activation matrix (of type float). Therefore for
-        // one thread, the # of blocks y should advance is SIMDWIDTH/2 (because
-        // SIMDWIDTH/2 blocks are processed by a SIMD group) - in terms of
-        // floats, it is QK4_0 * (SIMDWIDTH/2), where QK4_0 is the block size.
-        yb += QK4_0 * (N_SIMDWIDTH/2);
-    }
+    //     // One thread in a SIMD group (i.e., subgroup) handles a half block,
+    //     // hence then entire SIMD group handles SIMDWIDTH/2 blocks.
+    //     // y points to the activation matrix (of type float). Therefore for
+    //     // one thread, the # of blocks y should advance is SIMDWIDTH/2 (because
+    //     // SIMDWIDTH/2 blocks are processed by a SIMD group) - in terms of
+    //     // floats, it is QK4_0 * (SIMDWIDTH/2), where QK4_0 is the block size.
+    //     yb += QK4_0 * (N_SIMDWIDTH/2);
+    // }
 
-    // The above does not work for Adreno - it produces incorrect results for
-    // row = 1, 2, 3 and only row = 0 gives the correct result.
-    // If N_DST is changed, the below array must be initialized accordingly.
-    // This also seems to perform better on Intel.
-    float tot[N_DST] = {
-        sub_group_reduce_add(sumf[0]), sub_group_reduce_add(sumf[1]),
-        sub_group_reduce_add(sumf[2]), sub_group_reduce_add(sumf[3])};
-    for (int row = 0; row < N_DST; ++row) {
-        if (get_sub_group_local_id() == 0 && first_row + row < ne01) {
-            dst[r1*ne0 + im*ne0*ne1 + first_row + row] = tot[row];
-        }
-    }
+    // // The above does not work for Adreno - it produces incorrect results for
+    // // row = 1, 2, 3 and only row = 0 gives the correct result.
+    // // If N_DST is changed, the below array must be initialized accordingly.
+    // // This also seems to perform better on Intel.
+    // float tot[N_DST] = {
+    //     sub_group_reduce_add(sumf[0]), sub_group_reduce_add(sumf[1]),
+    //     sub_group_reduce_add(sumf[2]), sub_group_reduce_add(sumf[3])};
+    // for (int row = 0; row < N_DST; ++row) {
+    //     if (get_sub_group_local_id() == 0 && first_row + row < ne01) {
+    //         dst[r1*ne0 + im*ne0*ne1 + first_row + row] = tot[row];
+    //     }
+    // }
 }
 
 #ifdef INTEL_GPU

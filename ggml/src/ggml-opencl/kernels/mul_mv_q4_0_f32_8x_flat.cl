@@ -116,131 +116,131 @@ inline void mul_vec_q_n_f32_8x_flat(
         int r2,
         int r3
 ) {
-    const ulong nb = ne00/QK4_0;
+    // const ulong nb = ne00/QK4_0;
 
-    int r0 = get_group_id(0);
-    int r1 = get_group_id(1);
-    int im = get_group_id(2);
+    // int r0 = get_group_id(0);
+    // int r1 = get_group_id(1);
+    // int im = get_group_id(2);
 
-    // (r0 * N_SIMDGROUP + get_sub_group_id()) is the linear global id of
-    // a SIMD group in the grid. Each SIMD group produces N_DST values in the
-    // result, hence uses nb blocks, i.e., the offset becomes first_row*nb.
-    // Currently with llama2 7B, im is always 0.
-    // TODO: how to handle im/gqa*(nb*ne0)?
-    int first_row = (r0 * N_SIMDGROUP + get_sub_group_id()) * N_DST;
+    // // (r0 * N_SIMDGROUP + get_sub_group_id()) is the linear global id of
+    // // a SIMD group in the grid. Each SIMD group produces N_DST values in the
+    // // result, hence uses nb blocks, i.e., the offset becomes first_row*nb.
+    // // Currently with llama2 7B, im is always 0.
+    // // TODO: how to handle im/gqa*(nb*ne0)?
+    // int first_row = (r0 * N_SIMDGROUP + get_sub_group_id()) * N_DST;
 
-    int i12 = im%ne12;
-    int i13 = im/ne12;
+    // int i12 = im%ne12;
+    // int i13 = im/ne12;
 
-    // The number of scales is the same as the number of blocks.
-    ulong offset0_d = first_row * nb + (i12/r2)*(nb*ne01) + (i13/r3)*(nb*ne01*ne02);
-    // Each block contains QK4_0/2 uchars, hence offset for qs is as follows.
-    ulong offset0_q = (first_row * nb + (i12/r2)*(nb*ne01) + (i13/r3)*(nb*ne01*ne02)) * QK4_0/2;
+    // // The number of scales is the same as the number of blocks.
+    // ulong offset0_d = first_row * nb + (i12/r2)*(nb*ne01) + (i13/r3)*(nb*ne01*ne02);
+    // // Each block contains QK4_0/2 uchars, hence offset for qs is as follows.
+    // ulong offset0_q = (first_row * nb + (i12/r2)*(nb*ne01) + (i13/r3)*(nb*ne01*ne02)) * QK4_0/2;
 
-    global uchar * x = (global uchar *) src0_q + offset0_q;
-    global half  * d = (global half  *) src0_d + offset0_d;
-    global float * y = (global float *) src1   + r1*ne10 + im*ne00*ne1;
+    // global uchar * x = (global uchar *) src0_q + offset0_q;
+    // global half  * d = (global half  *) src0_d + offset0_d;
+    // global float * y = (global float *) src1   + r1*ne10 + im*ne00*ne1;
 
-    float16 yl;
-    float8 sumf = 0.f;
+    // float16 yl;
+    // float8 sumf = 0.f;
 
-    int ix = get_sub_group_local_id()/2;
-    int il = 8*(get_sub_group_local_id()%2);
+    // int ix = get_sub_group_local_id()/2;
+    // int il = 8*(get_sub_group_local_id()%2);
 
-    global float * yb = y + ix*QK4_0 + il;
+    // global float * yb = y + ix*QK4_0 + il;
 
-    for (int ib = ix; ib < nb; ib += N_SIMDWIDTH/2) {
-        float sumy = 0.f;
+    // for (int ib = ix; ib < nb; ib += N_SIMDWIDTH/2) {
+    //     float sumy = 0.f;
 
-        sumy += yb[0];
-        sumy += yb[1];
-        sumy += yb[2];
-        sumy += yb[3];
-        sumy += yb[4];
-        sumy += yb[5];
-        sumy += yb[6];
-        sumy += yb[7];
+    //     sumy += yb[0];
+    //     sumy += yb[1];
+    //     sumy += yb[2];
+    //     sumy += yb[3];
+    //     sumy += yb[4];
+    //     sumy += yb[5];
+    //     sumy += yb[6];
+    //     sumy += yb[7];
 
-        sumy += yb[16];
-        sumy += yb[17];
-        sumy += yb[18];
-        sumy += yb[19];
-        sumy += yb[20];
-        sumy += yb[21];
-        sumy += yb[22];
-        sumy += yb[23];
+    //     sumy += yb[16];
+    //     sumy += yb[17];
+    //     sumy += yb[18];
+    //     sumy += yb[19];
+    //     sumy += yb[20];
+    //     sumy += yb[21];
+    //     sumy += yb[22];
+    //     sumy += yb[23];
 
-        yl.s0 = yb[0];
-        yl.s1 = yb[1]/256.f;
+    //     yl.s0 = yb[0];
+    //     yl.s1 = yb[1]/256.f;
 
-        yl.s2 = yb[2];
-        yl.s3 = yb[3]/256.f;
+    //     yl.s2 = yb[2];
+    //     yl.s3 = yb[3]/256.f;
 
-        yl.s4 = yb[4];
-        yl.s5 = yb[5]/256.f;
+    //     yl.s4 = yb[4];
+    //     yl.s5 = yb[5]/256.f;
 
-        yl.s6 = yb[6];
-        yl.s7 = yb[7]/256.f;
+    //     yl.s6 = yb[6];
+    //     yl.s7 = yb[7]/256.f;
 
-        yl.s8 = yb[16]/16.f;
-        yl.s9 = yb[17]/4096.f;
+    //     yl.s8 = yb[16]/16.f;
+    //     yl.s9 = yb[17]/4096.f;
 
-        yl.sa = yb[18]/16.f;
-        yl.sb = yb[19]/4096.f;
+    //     yl.sa = yb[18]/16.f;
+    //     yl.sb = yb[19]/4096.f;
 
-        yl.sc = yb[20]/16.f;
-        yl.sd = yb[21]/4096.f;
+    //     yl.sc = yb[20]/16.f;
+    //     yl.sd = yb[21]/4096.f;
 
-        yl.se = yb[22]/16.f;
-        yl.sf = yb[23]/4096.f;
+    //     yl.se = yb[22]/16.f;
+    //     yl.sf = yb[23]/4096.f;
 
-        sumf.s0 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 0*nb*QK4_0/2, d + ib + 0*nb, sumy, yl, il);
-        sumf.s1 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 1*nb*QK4_0/2, d + ib + 1*nb, sumy, yl, il);
-        sumf.s2 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 2*nb*QK4_0/2, d + ib + 2*nb, sumy, yl, il);
-        sumf.s3 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 3*nb*QK4_0/2, d + ib + 3*nb, sumy, yl, il);
+    //     sumf.s0 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 0*nb*QK4_0/2, d + ib + 0*nb, sumy, yl, il);
+    //     sumf.s1 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 1*nb*QK4_0/2, d + ib + 1*nb, sumy, yl, il);
+    //     sumf.s2 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 2*nb*QK4_0/2, d + ib + 2*nb, sumy, yl, il);
+    //     sumf.s3 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 3*nb*QK4_0/2, d + ib + 3*nb, sumy, yl, il);
 
-        sumf.s4 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 4*nb*QK4_0/2, d + ib + 4*nb, sumy, yl, il);
-        sumf.s5 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 5*nb*QK4_0/2, d + ib + 5*nb, sumy, yl, il);
-        sumf.s6 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 6*nb*QK4_0/2, d + ib + 6*nb, sumy, yl, il);
-        sumf.s7 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 7*nb*QK4_0/2, d + ib + 7*nb, sumy, yl, il);
+    //     sumf.s4 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 4*nb*QK4_0/2, d + ib + 4*nb, sumy, yl, il);
+    //     sumf.s5 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 5*nb*QK4_0/2, d + ib + 5*nb, sumy, yl, il);
+    //     sumf.s6 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 6*nb*QK4_0/2, d + ib + 6*nb, sumy, yl, il);
+    //     sumf.s7 += block_q_4_0_dot_y_flat(x + ib*QK4_0/2 + 7*nb*QK4_0/2, d + ib + 7*nb, sumy, yl, il);
 
-        yb += QK4_0 * (N_SIMDWIDTH/2);
-    }
+    //     yb += QK4_0 * (N_SIMDWIDTH/2);
+    // }
 
-    float8 tot = (float8)(
-        sub_group_reduce_add(sumf.s0), sub_group_reduce_add(sumf.s1),
-        sub_group_reduce_add(sumf.s2), sub_group_reduce_add(sumf.s3),
-        sub_group_reduce_add(sumf.s4), sub_group_reduce_add(sumf.s5),
-        sub_group_reduce_add(sumf.s6), sub_group_reduce_add(sumf.s7)
-    );
+    // float8 tot = (float8)(
+    //     sub_group_reduce_add(sumf.s0), sub_group_reduce_add(sumf.s1),
+    //     sub_group_reduce_add(sumf.s2), sub_group_reduce_add(sumf.s3),
+    //     sub_group_reduce_add(sumf.s4), sub_group_reduce_add(sumf.s5),
+    //     sub_group_reduce_add(sumf.s6), sub_group_reduce_add(sumf.s7)
+    // );
 
-    if (get_sub_group_local_id() == 0) {
-        if (first_row + 0 < ne01) {
-            dst[r1*ne0 + im*ne0*ne1 + first_row + 0] = tot.s0;
-        }
-        if (first_row + 1 < ne01) {
-            dst[r1*ne0 + im*ne0*ne1 + first_row + 1] = tot.s1;
-        }
-        if (first_row + 2 < ne01) {
-            dst[r1*ne0 + im*ne0*ne1 + first_row + 2] = tot.s2;
-        }
-        if (first_row + 3 < ne01) {
-            dst[r1*ne0 + im*ne0*ne1 + first_row + 3] = tot.s3;
-        }
+    // if (get_sub_group_local_id() == 0) {
+    //     if (first_row + 0 < ne01) {
+    //         dst[r1*ne0 + im*ne0*ne1 + first_row + 0] = tot.s0;
+    //     }
+    //     if (first_row + 1 < ne01) {
+    //         dst[r1*ne0 + im*ne0*ne1 + first_row + 1] = tot.s1;
+    //     }
+    //     if (first_row + 2 < ne01) {
+    //         dst[r1*ne0 + im*ne0*ne1 + first_row + 2] = tot.s2;
+    //     }
+    //     if (first_row + 3 < ne01) {
+    //         dst[r1*ne0 + im*ne0*ne1 + first_row + 3] = tot.s3;
+    //     }
 
-        if (first_row + 4 < ne01) {
-            dst[r1*ne0 + im*ne0*ne1 + first_row + 4] = tot.s4;
-        }
-        if (first_row + 5 < ne01) {
-            dst[r1*ne0 + im*ne0*ne1 + first_row + 5] = tot.s5;
-        }
-        if (first_row + 6 < ne01) {
-            dst[r1*ne0 + im*ne0*ne1 + first_row + 6] = tot.s6;
-        }
-        if (first_row + 7 < ne01) {
-            dst[r1*ne0 + im*ne0*ne1 + first_row + 7] = tot.s7;
-        }
-    }
+    //     if (first_row + 4 < ne01) {
+    //         dst[r1*ne0 + im*ne0*ne1 + first_row + 4] = tot.s4;
+    //     }
+    //     if (first_row + 5 < ne01) {
+    //         dst[r1*ne0 + im*ne0*ne1 + first_row + 5] = tot.s5;
+    //     }
+    //     if (first_row + 6 < ne01) {
+    //         dst[r1*ne0 + im*ne0*ne1 + first_row + 6] = tot.s6;
+    //     }
+    //     if (first_row + 7 < ne01) {
+    //         dst[r1*ne0 + im*ne0*ne1 + first_row + 7] = tot.s7;
+    //     }
+    // }
 }
 
 #ifdef INTEL_GPU

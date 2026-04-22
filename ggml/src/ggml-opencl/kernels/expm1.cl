@@ -34,10 +34,10 @@ kernel void kernel_expm1_f16(
         global       half * dst,
         ulong               offsetd
 ) {
-    src0 = (global half*)((global char*)src0 + offset0);
-    dst  = (global half*)((global char*)dst + offsetd);
+    // src0 = (global half*)((global char*)src0 + offset0);
+    // dst  = (global half*)((global char*)dst + offsetd);
 
-    dst[get_global_id(0)] = exp(src0[get_global_id(0)]) - 1.0h;
+    // dst[get_global_id(0)] = exp(src0[get_global_id(0)]) - 1.0h;
 }
 
 kernel void kernel_expm1_f16_4(
@@ -46,10 +46,10 @@ kernel void kernel_expm1_f16_4(
         global       half4 * dst,
         ulong                offsetd
 ) {
-    src0 = (global half4*)((global char*)src0 + offset0);
-    dst  = (global half4*)((global char*)dst + offsetd);
+    // src0 = (global half4*)((global char*)src0 + offset0);
+    // dst  = (global half4*)((global char*)dst + offsetd);
 
-    dst[get_global_id(0)] = exp(src0[get_global_id(0)]) - 1.0h;
+    // dst[get_global_id(0)] = exp(src0[get_global_id(0)]) - 1.0h;
 }
 
 kernel void kernel_expm1_f32_nc(

@@ -64,77 +64,77 @@ kernel void kernel_mul_mv_id_q8_0_f32(
     int           ne0,
     int           ne1
 ) {
-    src0 = (global char *)((global char *)src0 + offset0);
-    src1 = (global char *)((global char *)src1 + offset1);
-    src2 = (global char *)((global char *)src2 + offset2);
-    dst  = (global char *)((global char *)dst  + offsetd);
+    // src0 = (global char *)((global char *)src0 + offset0);
+    // src1 = (global char *)((global char *)src1 + offset1);
+    // src2 = (global char *)((global char *)src2 + offset2);
+    // dst  = (global char *)((global char *)dst  + offsetd);
 
-    int iid1 = get_group_id(2)/ne20;
-    int idx  = get_group_id(2)%ne20;
+    // int iid1 = get_group_id(2)/ne20;
+    // int idx  = get_group_id(2)%ne20;
 
-    int i02 = ((global int *) (src2 + iid1*nb21))[idx];
+    // int i02 = ((global int *) (src2 + iid1*nb21))[idx];
 
-    int i11_ = idx % ne11;
-    int i12_ = iid1;
+    // int i11_ = idx % ne11;
+    // int i12_ = iid1;
 
-    int i1 = idx;
-    int i2 = i12_;
+    // int i1 = idx;
+    // int i2 = i12_;
 
-    global char * src0_cur = src0 + i02*nb02;
-    global char * src1_cur = src1 + i11_*nb11 + i12_*nb12;
+    // global char * src0_cur = src0 + i02*nb02;
+    // global char * src1_cur = src1 + i11_*nb11 + i12_*nb12;
 
-    global char * dst_cur = dst + (i1*ne0 + i2*ne1*ne0)*sizeof(float);
+    // global char * dst_cur = dst + (i1*ne0 + i2*ne1*ne0)*sizeof(float);
 
-    int nb = ne00/QK8_0;
+    // int nb = ne00/QK8_0;
 
-    int r0 = get_group_id(0);
-    int r1 = get_group_id(1);
+    // int r0 = get_group_id(0);
+    // int r1 = get_group_id(1);
 
-    int first_row = (r0*N_SG_Q8_0 + get_sub_group_id()) * N_R0_Q8_0;
+    // int first_row = (r0*N_SG_Q8_0 + get_sub_group_id()) * N_R0_Q8_0;
 
-    ulong offset_src1 = r1*nb11;
-    global float * y  = (global float *) (src1_cur + offset_src1);
+    // ulong offset_src1 = r1*nb11;
+    // global float * y  = (global float *) (src1_cur + offset_src1);
 
-    // pointers to src0 rows
-    global block_q8_0 * ax[N_R0_Q8_0];
-    for (int row = 0; row < N_R0_Q8_0; ++row) {
-        ulong offset_src0 = (first_row + row)*nb01;
-        ax[row] = (global block_q8_0 *) ((global char *) src0_cur + offset_src0);
-    }
+    // // pointers to src0 rows
+    // global block_q8_0 * ax[N_R0_Q8_0];
+    // for (int row = 0; row < N_R0_Q8_0; ++row) {
+    //     ulong offset_src0 = (first_row + row)*nb01;
+    //     ax[row] = (global block_q8_0 *) ((global char *) src0_cur + offset_src0);
+    // }
 
-    float yl[NB_Q8_0];
-    float sumf[N_R0_Q8_0] = { 0.f };
+    // float yl[NB_Q8_0];
+    // float sumf[N_R0_Q8_0] = { 0.f };
 
-    const short ix = get_sub_group_local_id()/4;
-    const short il = get_sub_group_local_id()%4;
+    // const short ix = get_sub_group_local_id()/4;
+    // const short il = get_sub_group_local_id()%4;
 
-    global float * yb = y + ix*QK8_0 + il*NB_Q8_0;
+    // global float * yb = y + ix*QK8_0 + il*NB_Q8_0;
 
-    // each thread handles NB_Q8_0 quants at a time
-    for (int ib = ix; ib < nb; ib += N_SIMDWIDTH/4) {
-        for (short i = 0; i < NB_Q8_0; ++i) {
-            yl[i] = yb[i];
-        }
+    // // each thread handles NB_Q8_0 quants at a time
+    // for (int ib = ix; ib < nb; ib += N_SIMDWIDTH/4) {
+    //     for (short i = 0; i < NB_Q8_0; ++i) {
+    //         yl[i] = yb[i];
+    //     }
 
-        for (short row = 0; row < N_R0_Q8_0; row++) {
-            global char * qs = ax[row][ib].qs + il*NB_Q8_0;
-            float sumq = 0.f;
-            for (short iq = 0; iq < NB_Q8_0; ++iq) {
-                sumq += qs[iq] * yl[iq];
-            }
-            sumf[row] += sumq*ax[row][ib].d;
-        }
+    //     for (short row = 0; row < N_R0_Q8_0; row++) {
+    //         global char * qs = ax[row][ib].qs + il*NB_Q8_0;
+    //         float sumq = 0.f;
+    //         for (short iq = 0; iq < NB_Q8_0; ++iq) {
+    //             sumq += qs[iq] * yl[iq];
+    //         }
+    //         sumf[row] += sumq*ax[row][ib].d;
+    //     }
 
-        yb += N_SIMDWIDTH*NB_Q8_0;
-    }
+    //     yb += N_SIMDWIDTH*NB_Q8_0;
+    // }
 
-    global float * dst_f32 = (global float *) dst_cur + (ulong)r1*ne0;
+    // global float * dst_f32 = (global float *) dst_cur + (ulong)r1*ne0;
 
-    for (int row = 0; row < N_R0_Q8_0; ++row) {
-        float tot = sub_group_reduce_add(sumf[row]);
+    // for (int row = 0; row < N_R0_Q8_0; ++row) {
+    //     float tot = sub_group_reduce_add(sumf[row]);
 
-        if (get_sub_group_local_id() == 0 && first_row + row < ne01) {
-            dst_f32[first_row + row] = tot;
-        }
-    }
+    //     if (get_sub_group_local_id() == 0 && first_row + row < ne01) {
+    //         dst_f32[first_row + row] = tot;
+    //     }
+    // }
 }

@@ -95,82 +95,82 @@ kernel void kernel_mul_mv_id_mxfp4_f32_flat(
     int           r2,
     int           r3
 ) {
-    dst  = dst  + offsetd;
+//     dst  = dst  + offsetd;
 
-    const int iid1 = get_group_id(2) / ne20;
-    const int idx  = get_group_id(2) % ne20;
+//     const int iid1 = get_group_id(2) / ne20;
+//     const int idx  = get_group_id(2) % ne20;
 
-    uint i02 = ((global uint *) (src2 + offset2 + iid1 * nb21))[idx];
+//     uint i02 = ((global uint *) (src2 + offset2 + iid1 * nb21))[idx];
 
-    int i11 = idx % ne11;
+//     int i11 = idx % ne11;
 
-    int nb = ne00 / QK_MXFP4;
+//     int nb = ne00 / QK_MXFP4;
 
-    uint src0_off = i02*nb02;
-    src0_off /= 17; // 17 = sizeof(block_mxfp4)
+//     uint src0_off = i02*nb02;
+//     src0_off /= 17; // 17 = sizeof(block_mxfp4)
 
-    src0_e = src0_e + src0_off;
+//     src0_e = src0_e + src0_off;
 
-    dst = dst + (idx * ne0 + iid1 * ne1 * ne0) * sizeof(float);
+//     dst = dst + (idx * ne0 + iid1 * ne1 * ne0) * sizeof(float);
 
-    int r0 = get_group_id(0);
-    int r1 = get_group_id(1);
+//     int r0 = get_group_id(0);
+//     int r1 = get_group_id(1);
 
-    int first_row = (r0 * N_SG_MXFP4 + get_sub_group_id()) * N_R0_MXFP4;
+//     int first_row = (r0 * N_SG_MXFP4 + get_sub_group_id()) * N_R0_MXFP4;
 
-    uint offset_src0 = first_row*nb01;
-    offset_src0 /= 17; // 17 = sizeof(block_mxfp4)
-#ifdef SRC0Q_IMG
-    ulong offset_q = src0_off + offset_src0;
-#else
-    src0_q = src0_q + src0_off*16;
-    global uchar16 * x_q = (global uchar16 *)(src0_q) + offset_src0;
-#endif
-    global uchar * x_e = src0_e + offset_src0;
+//     uint offset_src0 = first_row*nb01;
+//     offset_src0 /= 17; // 17 = sizeof(block_mxfp4)
+// #ifdef SRC0Q_IMG
+//     ulong offset_q = src0_off + offset_src0;
+// #else
+//     src0_q = src0_q + src0_off*16;
+//     global uchar16 * x_q = (global uchar16 *)(src0_q) + offset_src0;
+// #endif
+//     global uchar * x_e = src0_e + offset_src0;
 
-    const short ix = get_sub_group_local_id() >> 1;
-    const short it = get_sub_group_local_id() & 1;
+//     const short ix = get_sub_group_local_id() >> 1;
+//     const short it = get_sub_group_local_id() & 1;
 
-    float sumf[N_R0_MXFP4] = {0.f};
+//     float sumf[N_R0_MXFP4] = {0.f};
 
-    src1 = src1 + offset1 + i11 * nb11 + iid1 * nb12;
-    global float * y   = (global float *) (src1 + r1 * nb11);
-    global float * yb = y + ix * QK_MXFP4 + it * 8;
+//     src1 = src1 + offset1 + i11 * nb11 + iid1 * nb12;
+//     global float * y   = (global float *) (src1 + r1 * nb11);
+//     global float * yb = y + ix * QK_MXFP4 + it * 8;
 
-    for (int ib = ix; ib < nb; ib += N_SIMDWIDTH / 2) {
-        global float4 * y4 = (global float4 *)yb;
+//     for (int ib = ix; ib < nb; ib += N_SIMDWIDTH / 2) {
+//         global float4 * y4 = (global float4 *)yb;
 
-        #pragma unroll
-        for (short row = 0; row < N_R0_MXFP4; row++) {
-            uchar xb_e = x_e[row * nb + ib];
-#ifdef SRC0Q_IMG
-            ushort4 xb_q = as_ushort4(read_imageui(src0_q, (offset_q + row * nb + ib) * 2 + it).xy);
-#else
-            ushort4 xb_q = vload4(0, (global ushort *)((global uchar *)(x_q + row * nb + ib) + 8 * it));
-#endif
+//         #pragma unroll
+//         for (short row = 0; row < N_R0_MXFP4; row++) {
+//             uchar xb_e = x_e[row * nb + ib];
+// #ifdef SRC0Q_IMG
+//             ushort4 xb_q = as_ushort4(read_imageui(src0_q, (offset_q + row * nb + ib) * 2 + it).xy);
+// #else
+//             ushort4 xb_q = vload4(0, (global ushort *)((global uchar *)(x_q + row * nb + ib) + 8 * it));
+// #endif
 
-            half4 fp16x4_0 = mxfp4_to_fp16_packed(xb_q.s0);
-            half4 fp16x4_1 = mxfp4_to_fp16_packed(xb_q.s1);
-            float4 acc1 = y4[0] * (float4)(fp16x4_0.s0, fp16x4_0.s2, fp16x4_1.s0, fp16x4_1.s2);
-            acc1 += y4[4] * (float4)(fp16x4_0.s1, fp16x4_0.s3, fp16x4_1.s1, fp16x4_1.s3);
+//             half4 fp16x4_0 = mxfp4_to_fp16_packed(xb_q.s0);
+//             half4 fp16x4_1 = mxfp4_to_fp16_packed(xb_q.s1);
+//             float4 acc1 = y4[0] * (float4)(fp16x4_0.s0, fp16x4_0.s2, fp16x4_1.s0, fp16x4_1.s2);
+//             acc1 += y4[4] * (float4)(fp16x4_0.s1, fp16x4_0.s3, fp16x4_1.s1, fp16x4_1.s3);
 
-            fp16x4_0 = mxfp4_to_fp16_packed(xb_q.s2);
-            fp16x4_1 = mxfp4_to_fp16_packed(xb_q.s3);
-            acc1 += y4[1] * (float4)(fp16x4_0.s0, fp16x4_0.s2, fp16x4_1.s0, fp16x4_1.s2);
-            acc1 += y4[5] * (float4)(fp16x4_0.s1, fp16x4_0.s3, fp16x4_1.s1, fp16x4_1.s3);
+//             fp16x4_0 = mxfp4_to_fp16_packed(xb_q.s2);
+//             fp16x4_1 = mxfp4_to_fp16_packed(xb_q.s3);
+//             acc1 += y4[1] * (float4)(fp16x4_0.s0, fp16x4_0.s2, fp16x4_1.s0, fp16x4_1.s2);
+//             acc1 += y4[5] * (float4)(fp16x4_0.s1, fp16x4_0.s3, fp16x4_1.s1, fp16x4_1.s3);
 
-            sumf[row] += e8m0_to_fp32(xb_e) * ((acc1.s0 + acc1.s1) + (acc1.s2 + acc1.s3));
-        }
+//             sumf[row] += e8m0_to_fp32(xb_e) * ((acc1.s0 + acc1.s1) + (acc1.s2 + acc1.s3));
+//         }
 
-        yb += (N_SIMDWIDTH / 2) * QK_MXFP4;
-    }
+//         yb += (N_SIMDWIDTH / 2) * QK_MXFP4;
+//     }
 
-    global float * dst_f32 = (global float *)dst + (ulong)r1 * ne0;
+//     global float * dst_f32 = (global float *)dst + (ulong)r1 * ne0;
 
-    for (int row = 0; row < N_R0_MXFP4 && first_row + row < ne0; ++row) {
-        float sum_all = sub_group_reduce_add(sumf[row]);
-        if (get_sub_group_local_id() == 0) {
-            dst_f32[first_row + row] = sum_all;
-        }
-    }
+//     for (int row = 0; row < N_R0_MXFP4 && first_row + row < ne0; ++row) {
+//         float sum_all = sub_group_reduce_add(sumf[row]);
+//         if (get_sub_group_local_id() == 0) {
+//             dst_f32[first_row + row] = sum_all;
+//         }
+//     }
 }

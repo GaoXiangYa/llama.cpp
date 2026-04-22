@@ -48,60 +48,60 @@ kernel void kernel_soft_max_f16(
         float m1,
         int n_head_log2
 ) {
-    src0 = src0 + offset0;
-    src1 = src1 + offset1;
-    src2 = src2 + offset2;
-    dst  = dst  + offsetd;
+    // src0 = src0 + offset0;
+    // src1 = src1 + offset1;
+    // src2 = src2 + offset2;
+    // dst  = dst  + offsetd;
 
-    int i03 = get_group_id(2);
-    int i02 = get_group_id(1);
-    int i01 = get_group_id(0);
+    // int i03 = get_group_id(2);
+    // int i02 = get_group_id(1);
+    // int i01 = get_group_id(0);
 
-    int i13 = i03%ne13;
-    int i12 = i02%ne12;
-    int i11 = i01;
+    // int i13 = i03%ne13;
+    // int i12 = i02%ne12;
+    // int i11 = i01;
 
-    global float * psrc0 = (global float *)(src0 + i01*nb01 + i02*nb02 + i03*nb03);
-    global half  * pmask = src1 != src0 ? (global half *)(src1 + i11*nb11 + i12*nb12 + i13*nb13) : 0;
-    global float * psrc2 = src2 != src0 ? (global float *)(src2) : 0;
-    global float * pdst  = (global float *)(dst  + i01*nb1 + i02*nb2 + i03*nb3);
+    // global float * psrc0 = (global float *)(src0 + i01*nb01 + i02*nb02 + i03*nb03);
+    // global half  * pmask = src1 != src0 ? (global half *)(src1 + i11*nb11 + i12*nb12 + i13*nb13) : 0;
+    // global float * psrc2 = src2 != src0 ? (global float *)(src2) : 0;
+    // global float * pdst  = (global float *)(dst  + i01*nb1 + i02*nb2 + i03*nb3);
 
-    float slope = 1.0f;
+    // float slope = 1.0f;
 
-    // ALiBi
-    if (max_bias > 0.0f) {
-        int h = i02;
+    // // ALiBi
+    // if (max_bias > 0.0f) {
+    //     int h = i02;
 
-        float base = h < n_head_log2 ? m0 : m1;
-        int   exp  = h < n_head_log2 ? h + 1 : 2*(h - n_head_log2) + 1;
+    //     float base = h < n_head_log2 ? m0 : m1;
+    //     int   exp  = h < n_head_log2 ? h + 1 : 2*(h - n_head_log2) + 1;
 
-        slope = pow(base, exp);
-    }
+    //     slope = pow(base, exp);
+    // }
 
-    // parallel max
-    float lmax = psrc2 ? psrc2[i02] : -INFINITY;
-    for (int i00 = get_local_id(0); i00 < ne00; i00 += get_local_size(0)) {
-        lmax = fmax(lmax, psrc0[i00]*scale + (pmask ? slope*pmask[i00] : 0.0f));
-    }
-    float max = sub_group_reduce_max(lmax);
+    // // parallel max
+    // float lmax = psrc2 ? psrc2[i02] : -INFINITY;
+    // for (int i00 = get_local_id(0); i00 < ne00; i00 += get_local_size(0)) {
+    //     lmax = fmax(lmax, psrc0[i00]*scale + (pmask ? slope*pmask[i00] : 0.0f));
+    // }
+    // float max = sub_group_reduce_max(lmax);
 
-    // parallel sum
-    float lsum = 0.0f;
-    for (int i00 = get_local_id(0); i00 < ne00; i00 += get_local_size(0)) {
-        float exp_psrc0 = exp((psrc0[i00]*scale + (pmask ? slope*pmask[i00] : 0.0f)) - max);
-        lsum += exp_psrc0;
-        // Remember the result of exp here. exp is expensive, so we really do not
-        // wish to compute it twice.
-        pdst[i00] = exp_psrc0;
-    }
+    // // parallel sum
+    // float lsum = 0.0f;
+    // for (int i00 = get_local_id(0); i00 < ne00; i00 += get_local_size(0)) {
+    //     float exp_psrc0 = exp((psrc0[i00]*scale + (pmask ? slope*pmask[i00] : 0.0f)) - max);
+    //     lsum += exp_psrc0;
+    //     // Remember the result of exp here. exp is expensive, so we really do not
+    //     // wish to compute it twice.
+    //     pdst[i00] = exp_psrc0;
+    // }
 
-    float sum = sub_group_reduce_add(lsum);
+    // float sum = sub_group_reduce_add(lsum);
 
-    if (psrc2) {
-        sum += exp(psrc2[i02] - max);
-    }
+    // if (psrc2) {
+    //     sum += exp(psrc2[i02] - max);
+    // }
 
-    for (int i00 = get_local_id(0); i00 < ne00; i00 += get_local_size(0)) {
-        pdst[i00] /= sum;
-    }
+    // for (int i00 = get_local_id(0); i00 < ne00; i00 += get_local_size(0)) {
+    //     pdst[i00] /= sum;
+    // }
 }

@@ -87,6 +87,7 @@ static fastdiv_vals init_fastdiv_values(uint64_t d_64) {
 enum GPU_FAMILY {
     ADRENO,
     INTEL,
+    GLENFLY,
     UNKNOWN,
 };
 
@@ -3120,7 +3121,10 @@ static ggml_backend_opencl_context * ggml_cl2_init(ggml_backend_dev_t dev) {
         backend_ctx->adreno_wave_size = 64;
     } else if (strstr(dev_ctx->device_name.c_str(), "Intel")) {
         backend_ctx->gpu_family = GPU_FAMILY::INTEL;
-    } else {
+    } else if (strstr(dev_ctx->device_name.c_str(), "Glenfly Arise-GT10C0t")) {
+        backend_ctx->gpu_family = GPU_FAMILY::GLENFLY;
+    }
+    else {
         GGML_LOG_ERROR("Unsupported GPU: %s\n", dev_ctx->device_name.c_str());
         backend_ctx->gpu_family = GPU_FAMILY::UNKNOWN;
         return nullptr;
@@ -8120,7 +8124,10 @@ static void ggml_opencl_op_rms_norm_fused(ggml_backend_t backend, ggml_tensor * 
         sgs = 64;
     } else if (backend_ctx->gpu_family == INTEL) {
         sgs = 32;
-    } else {
+    } else if (backend_ctx->gpu_family == GLENFLY) {
+        sgs = 64;
+    }
+    else {
         GGML_ASSERT(false && "Unsupported GPU");
     }
 
@@ -8377,6 +8384,8 @@ static void ggml_cl_l2_norm(ggml_backend_t backend, const ggml_tensor * src0, co
         sgs = 64;
     } else if (backend_ctx->gpu_family == INTEL) {
         sgs = 32;
+    } else if (backend_ctx->gpu_family == GLENFLY) {
+        sgs = 64;
     } else {
         GGML_ASSERT(false && "Unsupported GPU");
     }
@@ -11475,7 +11484,18 @@ static void ggml_cl_mul_mat(ggml_backend_t backend, const ggml_tensor * src0, co
                     nth1 = 1;
 
                     kernel = backend_ctx->kernel_mul_mat_q4_0_f32_1d_8x_flat;
-                } else {
+                } else if (backend_ctx->gpu_family == GLENFLY) {
+                    nth0 = 64;
+                    nth1 = 1;
+
+                    kernel = backend_ctx->kernel_mul_mat_q4_0_f32_1d_8x_flat;
+                } else if (backend_ctx->gpu_family == GLENFLY) {
+                    nth0 = 64;
+                    nth1 = 1;
+
+                    kernel = backend_ctx->kernel_mul_mat_q4_0_f32_1d_8x_flat;
+                }
+                else {
                     GGML_ASSERT(false && "TODO: Unknown GPU");
                 }
 
@@ -11533,7 +11553,11 @@ static void ggml_cl_mul_mat(ggml_backend_t backend, const ggml_tensor * src0, co
             } else if (backend_ctx->gpu_family == ADRENO) {
                 nth0 = 64;
                 nth1 = 1;
-            } else {
+            } else if (backend_ctx->gpu_family == GLENFLY) {
+                nth0 = 64;
+                nth1 = 1;
+            }
+            else {
                 GGML_ASSERT(false && "TODO: Unknown GPU");
             }
 
@@ -11568,6 +11592,9 @@ static void ggml_cl_mul_mat(ggml_backend_t backend, const ggml_tensor * src0, co
                 nth0 = 32;
                 nth1 = 1;
             } else if (backend_ctx->gpu_family == ADRENO) {
+                nth0 = 64;
+                nth1 = 1;
+            } else if (backend_ctx->gpu_family == GLENFLY) {
                 nth0 = 64;
                 nth1 = 1;
             } else {
@@ -11632,7 +11659,14 @@ static void ggml_cl_mul_mat(ggml_backend_t backend, const ggml_tensor * src0, co
 
                 kernel = backend_ctx->kernel_mul_mat_q4_0_f32_8x_flat;
                 ndst =8;
-            } else {
+            } else if (backend_ctx->gpu_family == GLENFLY) {
+                nth0 = 64;
+                nth1 = 1;
+
+                kernel = backend_ctx->kernel_mul_mat_q4_0_f32_8x_flat;
+                ndst =8;
+            }
+            else {
                 GGML_ASSERT(false && "TODO: Unknown GPU");
             }
 
@@ -11699,7 +11733,12 @@ static void ggml_cl_mul_mat(ggml_backend_t backend, const ggml_tensor * src0, co
                 nth0 = 64;
                 nth1 = 1;
                 ndst = 4;
-            } else {
+            } else if (backend_ctx->gpu_family == GLENFLY) {
+                nth0 = 64;
+                nth1 = 1;
+                ndst = 4;
+            }
+            else {
                 GGML_ASSERT(false && "TODO: Unknown GPU");
             }
 
@@ -11769,7 +11808,12 @@ static void ggml_cl_mul_mat(ggml_backend_t backend, const ggml_tensor * src0, co
                 nth0 = 64;
                 nth1 = 2;
                 ndst = nth1*4;
-            } else {
+            } else if (backend_ctx->gpu_family == GLENFLY) {
+                nth0 = 64;
+                nth1 = 2;
+                ndst = nth1*4;
+            }
+            else {
                 GGML_ASSERT(false && "TODO: Unknown GPU");
             }
 
@@ -11846,7 +11890,12 @@ static void ggml_cl_mul_mat(ggml_backend_t backend, const ggml_tensor * src0, co
                 nth0 = 64;
                 nth1 = 2;
                 ndst = 16;
-            } else {
+            } else if (backend_ctx->gpu_family == GLENFLY) {
+                nth0 = 64;
+                nth1 = 2;
+                ndst = 16;
+            }
+            else {
                 GGML_ASSERT(false && "TODO: Unknown GPU");
             }
 
@@ -11917,6 +11966,10 @@ static void ggml_cl_mul_mat(ggml_backend_t backend, const ggml_tensor * src0, co
                 nth1 = 1;
                 ndst = 4;
             } else if (backend_ctx->gpu_family == ADRENO) {
+                nth0 = 64;
+                nth1 = 2;
+                ndst = 16;
+            } else if (backend_ctx->gpu_family == GLENFLY) {
                 nth0 = 64;
                 nth1 = 2;
                 ndst = 16;
@@ -11995,6 +12048,10 @@ static void ggml_cl_mul_mat(ggml_backend_t backend, const ggml_tensor * src0, co
                 nth0 = 64;
                 nth1 = 2;
                 ndst = 4;
+            } else if (backend_ctx->gpu_family == GLENFLY) {
+                nth0 = 64;
+                nth1 = 2;
+                ndst = 4;
             } else {
                 GGML_ASSERT(false && "TODO: Unknown GPU");
             }
@@ -12060,6 +12117,12 @@ static void ggml_cl_mul_mat(ggml_backend_t backend, const ggml_tensor * src0, co
 
                 q = extra0_mxfp4->q;
             } else if (backend_ctx->gpu_family == ADRENO) {
+                nth0 = 64;
+                nth1 = 2;
+                ndst = nth1*2;
+
+                q = extra0_mxfp4->q_img;
+            } else if (backend_ctx->gpu_family == GLENFLY) {
                 nth0 = 64;
                 nth1 = 2;
                 ndst = nth1*2;
@@ -12257,6 +12320,10 @@ static void ggml_cl_mul_mat_id(ggml_backend_t backend, const ggml_tensor * src0,
                 sgs  = 64;
                 nsg  = 1;
                 ndst = 8;
+            } else if (backend_ctx->gpu_family == GLENFLY) {
+                sgs  = 64;
+                nsg  = 1;
+                ndst = 8;
             } else {
                 GGML_ASSERT(false && "TODO: Unknown GPU");
             }
@@ -12298,6 +12365,10 @@ static void ggml_cl_mul_mat_id(ggml_backend_t backend, const ggml_tensor * src0,
                 nsg  = 2;
                 ndst = 4;
             } else if (backend_ctx->gpu_family == ADRENO) {
+                sgs  = 64;
+                nsg  = 2;
+                ndst = 4;
+            } else if (backend_ctx->gpu_family == GLENFLY) {
                 sgs  = 64;
                 nsg  = 2;
                 ndst = 4;
@@ -12479,6 +12550,12 @@ static void ggml_cl_mul_mat_id(ggml_backend_t backend, const ggml_tensor * src0,
                 sgs  = 64;
                 nsg  = 1;
                 ndst = 4;
+
+                q = extra0_mxfp4->q_img;
+            } else if (backend_ctx->gpu_family == GLENFLY) {
+                sgs  = 64;
+                nsg  = 1;
+                ndst = 8;
 
                 q = extra0_mxfp4->q_img;
             } else {
@@ -12979,6 +13056,8 @@ static void ggml_cl_soft_max(ggml_backend_t backend, const ggml_tensor * src0, c
         nth = MIN(32, ne00);
     }
     else if (backend_ctx->gpu_family == ADRENO) {
+        nth = 64;
+    } else if (backend_ctx->gpu_family == GLENFLY) {
         nth = 64;
     } else {
         GGML_ASSERT(false && "TODO: Unknown GPU");
