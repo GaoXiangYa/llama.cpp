@@ -161,6 +161,9 @@ set(GGML_OPENCL_KERNELS
     flash_attn_f32_f16
     flash_attn_f16
     flash_attn_f32
+
+    # arise kernel
+    arise_softmax_f32
 )
 
 foreach (K ${GGML_OPENCL_KERNELS})

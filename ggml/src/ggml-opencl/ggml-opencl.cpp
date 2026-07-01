@@ -482,6 +482,9 @@ struct ggml_backend_opencl_context {
     cl_program program_mul_mm_f16_f32_l4_lm;
     cl_program program_mul_mm_q8_0_f32_l4_lm;
 
+    // Arise kernels
+    cl_program program_arise_softmax_f32;
+
     cl_kernel kernel_add, kernel_add_row, kernel_add_f16, kernel_add_row_f16;
     cl_kernel kernel_mul, kernel_mul_row, kernel_mul_f16, kernel_mul_row_f16;
     cl_kernel kernel_div, kernel_div_row, kernel_div_f16, kernel_div_row_f16;
@@ -598,6 +601,9 @@ struct ggml_backend_opencl_context {
     cl_kernel kernel_mul_mm_q4_k_f32_l4_lm;
     cl_kernel kernel_mul_mm_q5_k_f32_l4_lm;
     cl_kernel kernel_mul_mm_q6_k_f32_l4_lm;
+
+    // Arise kernels
+    cl_kernel kernel_arise_softmax_f32;
 
     std::vector<ProfilingInfo> profiling_info;
 
@@ -2470,6 +2476,20 @@ static void load_cl_kernels(ggml_backend_opencl_context *backend_ctx, ggml_cl_ve
             build_program_from_source(backend_ctx->context, backend_ctx->device, kernel_src.c_str(), compile_opts);
 
         CL_CHECK((backend_ctx->kernel_mul_mv_id_mxfp4_f32_flat = clCreateKernel(backend_ctx->program_mul_mv_id_mxfp4_f32_flat, "kernel_mul_mv_id_mxfp4_f32_flat", &err), err));
+        GGML_LOG_CONT(".");
+    }
+
+    // Arise kernels
+    {
+#ifdef GGML_OPENCL_EMBED_KERNELS
+        const std::string kernel_src {
+            #include "arise_softmax_f32.cl.h"
+        };
+#else
+        const std::string kernel_src = read_file("arise_softmax_f32.cl");
+#endif
+        backend_ctx->program_arise_softmax_f32 = build_program_from_source(backend_ctx->context, backend_ctx->device, kernel_src.c_str(), compile_opts);
+        CL_CHECK((backend_ctx->kernel_arise_softmax_f32 = clCreateKernel(backend_ctx->program_arise_softmax_f32, "kernel_arise_softmax_f32", &err), err));
         GGML_LOG_CONT(".");
     }
 
@@ -13068,21 +13088,25 @@ static void ggml_cl_soft_max(ggml_backend_t backend, const ggml_tensor * src0, c
         GGML_ASSERT(false && "TODO: Unknown GPU");
     }
 
-    cl_kernel kernel;
-
-    if (ne00%4 == 0) {
-        if (use_f16) {
-            kernel = backend_ctx->kernel_soft_max_4_f16;
-        } else {
-            kernel = backend_ctx->kernel_soft_max_4;
-        }
+    cl_kernel kernel = nullptr;
+    if (use_f16) {
+        kernel = backend_ctx->kernel_soft_max_f16;
     } else {
-        if (use_f16) {
-            kernel = backend_ctx->kernel_soft_max_f16;
-        } else {
-            kernel = backend_ctx->kernel_soft_max;
-        }
+        kernel = backend_ctx->gpu_family == GLENFLY ? backend_ctx->kernel_arise_softmax_f32 : backend_ctx->kernel_soft_max;
     }
+    // if (ne00%4 == 0) {
+    //     if (use_f16) {
+    //         kernel = backend_ctx->kernel_soft_max_4_f16;
+    //     } else {
+    //         kernel = backend_ctx->kernel_soft_max_4;
+    //     }
+    // } else {
+    //     if (use_f16) {
+    //         kernel = backend_ctx->kernel_soft_max_f16;
+    //     } else {
+    //         kernel = backend_ctx->kernel_soft_max;
+    //     }
+    // }
 
     CL_CHECK(clSetKernelArg(kernel,  0, sizeof(cl_mem),   &extra0->data_device));
     CL_CHECK(clSetKernelArg(kernel,  1, sizeof(cl_ulong), &offset0));
