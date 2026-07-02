@@ -165,6 +165,7 @@ set(GGML_OPENCL_KERNELS
     # arise kernel
     arise_softmax_f32
     arise_add
+    arise_mul
 )
 
 foreach (K ${GGML_OPENCL_KERNELS})
