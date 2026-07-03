@@ -485,6 +485,7 @@ struct ggml_backend_opencl_context {
     cl_program program_arise_softmax_f32;
     cl_program program_arise_add;
     cl_program program_arise_mul;
+    cl_program program_arise_rmsnorm;
 
     cl_kernel kernel_add, kernel_add_row, kernel_add_f16, kernel_add_row_f16;
     cl_kernel kernel_mul, kernel_mul_row, kernel_mul_f16, kernel_mul_row_f16;
@@ -608,6 +609,7 @@ struct ggml_backend_opencl_context {
     cl_kernel                  kernel_arise_softmax_f32;
     cl_kernel                  kernel_arise_add;
     cl_kernel                  kernel_arise_mul;
+    cl_kernel                  kernel_arise_rmsnorm;
     std::vector<ProfilingInfo> profiling_info;
 
     void write_profiling_info() {
@@ -2781,6 +2783,23 @@ static void load_cl_kernels(ggml_backend_opencl_context * backend_ctx, ggml_cl_v
         CL_CHECK(
             (backend_ctx->kernel_arise_mul = clCreateKernel(backend_ctx->program_arise_mul, "kernel_arise_mul", &err),
              err));
+        GGML_LOG_CONT(".");
+    }
+
+    // arise_rmsnorm
+    {
+#ifdef GGML_OPENCL_EMBED_KERNELS
+        const std::string kernel_src{
+#    include "arise_rmsnorm.cl.h"
+        };
+#else
+        const std::string kernel_src = read_file("arise_rmsnorm.cl");
+#endif
+        backend_ctx->program_arise_rmsnorm =
+            build_program_from_source(backend_ctx->context, backend_ctx->device, kernel_src.c_str(), compile_opts);
+        CL_CHECK((backend_ctx->kernel_arise_rmsnorm =
+                      clCreateKernel(backend_ctx->program_arise_rmsnorm, "kernel_arise_rmsnorm", &err),
+                  err));
         GGML_LOG_CONT(".");
     }
     // Adreno kernels
@@ -8460,6 +8479,29 @@ static void ggml_cl_rms_norm(ggml_backend_t      backend,
 
     GGML_ASSERT(ne00 % 4 == 0);
 
+    if (backend_ctx->gpu_family == GLENFLY) {
+        cl_kernel kernel = backend_ctx->kernel_arise_rmsnorm;
+        constexpr int nth = 256;
+        constexpr int warp_size = 64;
+        constexpr int warp_count = nth / warp_size;
+        size_t global_work_size[] = { (size_t) ne01 * nth, (size_t) ne02, (size_t) ne03 };
+        size_t local_work_size[]  = { (size_t) nth, 1, 1 };
+
+        CL_CHECK(clSetKernelArg(kernel, 0, sizeof(cl_mem), &extra0->data_device));
+        CL_CHECK(clSetKernelArg(kernel, 1, sizeof(cl_ulong), &offset0));
+        CL_CHECK(clSetKernelArg(kernel, 2, sizeof(cl_mem), &extrad->data_device));
+        CL_CHECK(clSetKernelArg(kernel, 3, sizeof(cl_ulong), &offsetd));
+        CL_CHECK(clSetKernelArg(kernel, 4, sizeof(int), &ne00));
+        CL_CHECK(clSetKernelArg(kernel, 8, sizeof(cl_ulong), &nb01));
+        CL_CHECK(clSetKernelArg(kernel, 9, sizeof(cl_ulong), &nb02));
+        CL_CHECK(clSetKernelArg(kernel, 10, sizeof(cl_ulong), &nb03));
+        CL_CHECK(clSetKernelArg(kernel, 11, sizeof(float), &eps));
+        // This is local memory - the size depends on subgroup size.
+        CL_CHECK(clSetKernelArg(kernel, 12, sizeof(float) * warp_count, NULL));
+
+        backend_ctx->enqueue_ndrange_kernel(kernel, 3, global_work_size, local_work_size, dst);
+    }
+
     const int nth = MIN(64, ne00);
 
     size_t global_work_size[] = { (size_t) ne01 * nth, (size_t) ne02, (size_t) ne03 };
@@ -8480,6 +8522,8 @@ static void ggml_cl_rms_norm(ggml_backend_t      backend,
         sgs = 64;
     } else if (backend_ctx->gpu_family == INTEL) {
         sgs = 32;
+    } else if (backend_ctx->gpu_family == GLENFLY) {
+        sgs = 64;
     } else {
         GGML_ASSERT(false && "Unsupported GPU");
     }
