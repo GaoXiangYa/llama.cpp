@@ -168,6 +168,7 @@ set(GGML_OPENCL_KERNELS
     arise_mul
     arise_rmsnorm
     arise_get_rows
+    arise_mul_mm_f32_f32_l4_lm
 )
 
 foreach (K ${GGML_OPENCL_KERNELS})
