@@ -266,6 +266,12 @@ option(GGML_OPENCL_USE_ADRENO_KERNELS       "ggml: use optimized kernels for Adr
 set   (GGML_OPENCL_TARGET_VERSION "300" CACHE STRING
                                             "ggml: OpenCL API version to target")
 
+option(GGML_OCL                             "ggml: use ggml-ocl backend"                      OFF)
+option(GGML_OCL_PROFILING                   "ggml: use OpenCL profiling (increases overhead)" OFF)
+option(GGML_OCL_EMBED_KERNELS               "ggml: embed kernels"                             ON)
+set   (GGML_OCL_TARGET_VERSION "300" CACHE STRING
+                                            "ggml: OpenCL API version to target")
+
 option(GGML_HEXAGON                         "ggml: enable Hexagon backend"                    OFF)
 
 # toolchain for vulkan-shaders-gen

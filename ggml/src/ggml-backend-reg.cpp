@@ -58,6 +58,10 @@
 #include "ggml-opencl.h"
 #endif
 
+#ifdef GGML_USE_OCL
+#include "ggml-ocl.h"
+#endif
+
 #ifdef GGML_USE_HEXAGON
 #include "ggml-hexagon.h"
 #endif
@@ -146,6 +150,9 @@ struct ggml_backend_registry {
 
 #ifdef GGML_USE_OPENCL
         register_backend(ggml_backend_opencl_reg());
+#endif
+#ifdef GGML_USE_OCL
+        register_backend(ggml_backend_ocl_reg());
 #endif
 #ifdef GGML_USE_ZENDNN
         register_backend(ggml_backend_zendnn_reg());
