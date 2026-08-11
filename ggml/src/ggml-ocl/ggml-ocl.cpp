@@ -40,7 +40,8 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
     cl_device_id   default_device   = nullptr;
 
     for (cl_uint i = 0; i < n_platforms; i++) {
-        char pname[128] = {0}, pvendor[128] = {0};
+        char pname[128] = {0};
+        char pvendor[128] = {0};
         clGetPlatformInfo(platform_ids[i], CL_PLATFORM_NAME, sizeof(pname), pname, nullptr);
         clGetPlatformInfo(platform_ids[i], CL_PLATFORM_VENDOR, sizeof(pvendor), pvendor, nullptr);
 
@@ -255,10 +256,17 @@ static const char * ggml_ocl_device_get_description(ggml_backend_dev_t dev) {
 static void ggml_ocl_device_get_memory(ggml_backend_dev_t dev, size_t * free, size_t * total) {
     ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) dev->context;
 
-    // M0: 无记账, 用 global size 减 1 GiB 余量; S6 起改为池记账
-    static const size_t margin = 1ull * 1024 * 1024 * 1024;
     *total = dev_ctx->global_mem_size;
-    *free  = *total > margin ? *total - margin : 0;
+    if (dev_ctx->backend != nullptr) {
+        // 记账值 (DESIGN.md 16.5); multi-buffer 拆分由 ggml-alloc 处理
+        *free = *total > dev_ctx->backend->mem_allocated
+                    ? *total - dev_ctx->backend->mem_allocated
+                    : 0;
+    } else {
+        // backend 未初始化 (设备枚举阶段): 用 global size 减 1 GiB 余量兜底
+        static const size_t margin = 1ull * 1024 * 1024 * 1024;
+        *free = *total > margin ? *total - margin : 0;
+    }
 }
 
 static enum ggml_backend_dev_type ggml_ocl_device_get_type(ggml_backend_dev_t dev) {
@@ -293,6 +301,10 @@ static ggml_backend_t ggml_ocl_device_init(ggml_backend_dev_t dev, const char * 
     OCL_CHECK((b->q_copy    = clCreateCommandQueueWithProperties(b->context, dev_ctx->device, nullptr, nullptr), 0));
 
     b->scratch_pool.init(b->context);
+
+    // 启动期全量编译 kernel (进程级共享, 幂等); 推理期零编译
+    b->kmgr = &dev_ctx->kmgr;
+    b->kmgr->compile_all(b);
 
     dev_ctx->backend = b;
     dev_ctx->context_refs++;

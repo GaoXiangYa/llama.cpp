@@ -27,6 +27,32 @@
 struct ggml_ocl_backend;
 
 // ---------------------------------------------------------------------------
+// kernel manager (DESIGN.md section 15)
+// ---------------------------------------------------------------------------
+
+enum ocl_kernel_state { KS_OK, KS_FAILED };
+
+struct ocl_kernel_entry {
+    const char * src_id = nullptr;      // 源名, 如 "gemv_q4_1"
+    std::string compile_opts;           // 按类别的编译选项
+    ocl_kernel_state state = KS_OK;
+    cl_program program = nullptr;
+    std::vector<cl_kernel> kernels;     // 同一源内的多个 kernel 函数
+    std::map<std::string, int> kernel_index;   // fn 名 -> kernels 下标
+};
+
+class ocl_kernel_mgr {
+    std::mutex m_;                      // 仅启动期需要; 推理期单线程读
+    std::map<std::string, ocl_kernel_entry> entries_;
+public:
+    // 启动期: 编译全部 kernel (backend 创建时调用一次, 幂等)
+    void compile_all(ggml_ocl_backend * backend);
+    // 推理期: 纯查表, 零编译; 返回 nullptr 表示该源/函数不可用
+    cl_kernel get(const char * src_id, const char * fn_name);
+    bool is_ready(const char * src_id) const;
+};
+
+// ---------------------------------------------------------------------------
 // device context (DESIGN.md section 11.2; created in ggml-ocl.cpp)
 // ---------------------------------------------------------------------------
 
@@ -41,6 +67,13 @@ struct ggml_ocl_device_context {
     int            context_refs = 0;
     ggml_ocl_backend * backend = nullptr;   // set on init_backend
     ggml_backend_buffer_type buffer_type = {};
+
+    // 进程级共享 kernel 管理器: backend 可能被 sched 多次 init/free,
+    // 启动期只编译一次, 避免每次 init 重复编译
+    ocl_kernel_mgr kmgr;
+
+    // 显存记账 (DESIGN.md 16.5): 已分配 cl_mem 总量, 供 get_memory 使用
+    size_t mem_allocated = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -190,35 +223,12 @@ public:
 
 // extra 对象池: 从 buffer ctx 内分配/回收 extra
 class ocl_extra_pool {
-    std::vector<ggml_ocl_tensor_extra *> free_;
+    std::vector<ggml_ocl_tensor_extra *> free_;   // 可复用
+    std::vector<ggml_ocl_tensor_extra *> all_;    // 全部已分配 (reset/free 用)
 public:
     ggml_ocl_tensor_extra * alloc();
-    void free_all();                  // buffer 释放时统一回收
-};
-
-// ---------------------------------------------------------------------------
-// kernel manager (DESIGN.md section 15)
-// ---------------------------------------------------------------------------
-
-enum ocl_kernel_state { KS_OK, KS_FAILED };
-
-struct ocl_kernel_entry {
-    const char * src_id = nullptr;      // 源名, 如 "gemv_q4_1"
-    std::string compile_opts;           // 按类别的编译选项
-    ocl_kernel_state state = KS_OK;
-    cl_program program = nullptr;
-    std::vector<cl_kernel> kernels;     // 同一源内的多个 kernel 函数 (按 fn 名索引)
-};
-
-class ocl_kernel_mgr {
-    std::mutex m_;                      // 仅启动期需要; 推理期单线程读
-    std::map<std::string, ocl_kernel_entry> entries_;
-public:
-    // 启动期: 编译全部 kernel (backend 创建时调用一次)
-    void compile_all(ggml_ocl_backend * backend);
-    // 推理期: 纯查表, 零编译; 返回 nullptr 表示该源不可用
-    cl_kernel get(const char * src_id, const char * fn_name);
-    bool is_ready(const char * src_id) const;
+    void reset();                  // 全部归还 free_ (buffer reset 时)
+    void free_all();               // buffer 释放时统一回收
 };
 
 // ---------------------------------------------------------------------------
@@ -283,9 +293,12 @@ struct ggml_ocl_backend {
     cl_command_queue q_compute = nullptr;   // in-order 计算队列
     cl_command_queue q_copy    = nullptr;   // in-order 拷贝队列
 
-    ocl_kernel_mgr kmgr;
+    ocl_kernel_mgr * kmgr = nullptr;    // 进程级共享 (指向 dev_ctx->kmgr)
     ocl_pool scratch_pool;
     ocl_subpool sub_pool;
+
+    // 显存记账 (DESIGN.md 16.5): 已分配 buffer 总字节, 供 get_memory
+    size_t mem_allocated = 0;
 
     const ggml_ocl_vendor * vendor = nullptr;
 
