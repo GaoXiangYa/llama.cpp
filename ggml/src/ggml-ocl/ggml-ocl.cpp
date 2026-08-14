@@ -174,6 +174,9 @@ static void ggml_ocl_backend_free(ggml_backend_t backend) {
     if (b->q_copy) {
         OCL_CHECK(clReleaseCommandQueue(b->q_copy));
     }
+#ifdef GGML_OCL_PROFILING
+    b->stats.print();
+#endif
 
     // context 为进程级共享 (dev_ctx 持有), 不随 backend 释放;
     // backend 可能被 sched 多次 init/free
@@ -192,6 +195,9 @@ static void ggml_ocl_backend_synchronize(ggml_backend_t backend) {
 // M0: 空骨架 - 过滤视图类节点, 其余跳过 (supports_op 全 false, 不应有计算节点到达)
 static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_cgraph * cgraph) {
     ggml_ocl_backend * b = (ggml_ocl_backend *) backend->context;
+
+    // 等待 H2D 上传完成 (set_tensor 记录的事件)
+    ocl_exec_wait_pending_copies(b);
 
     for (int i = 0; i < cgraph->n_nodes; i++) {
         ggml_tensor * node = cgraph->nodes[i];
@@ -213,10 +219,11 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
             continue;
         }
 
-        GGML_LOG_WARN("ggml-ocl: unsupported op skipped (%s)\n", ggml_op_name(node->op));
+        bool ok = ocl_op_dispatch(b, node);
+        GGML_ASSERT(ok && "unsupported op in graph (supports_op should have filtered it)");
     }
 
-    clFlush(b->q_compute);
+    ocl_exec_flush(b);
     return GGML_STATUS_SUCCESS;
 }
 
@@ -297,8 +304,12 @@ static ggml_backend_t ggml_ocl_device_init(ggml_backend_dev_t dev, const char * 
     ggml_ocl_caps_print(&b->caps);
 
     b->context = dev_ctx->context;
-    OCL_CHECK((b->q_compute = clCreateCommandQueueWithProperties(b->context, dev_ctx->device, nullptr, nullptr), 0));
-    OCL_CHECK((b->q_copy    = clCreateCommandQueueWithProperties(b->context, dev_ctx->device, nullptr, nullptr), 0));
+    cl_command_queue_properties queue_props = 0;
+#ifdef GGML_OCL_PROFILING
+    queue_props |= CL_QUEUE_PROFILING_ENABLE;
+#endif
+    OCL_CHECK((b->q_compute = clCreateCommandQueueWithProperties(b->context, dev_ctx->device, &queue_props, nullptr), 0));
+    OCL_CHECK((b->q_copy    = clCreateCommandQueueWithProperties(b->context, dev_ctx->device, &queue_props, nullptr), 0));
 
     b->scratch_pool.init(b->context);
 
@@ -342,10 +353,14 @@ static bool ggml_ocl_device_supports_op(ggml_backend_dev_t dev, const struct ggm
         case GGML_OP_PERMUTE:
             return true;
         default:
-            // M0: 计算类 op 全部回退 CPU; S8 起接入 op 注册表
-            GGML_UNUSED(dev);
-            return false;
+            break;
     }
+    // 计算类 op 查注册表 (S8+)
+    ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) dev->context;
+    if (dev_ctx->backend == nullptr) {
+        return false;
+    }
+    return ocl_op_supports(&dev_ctx->backend->caps, op);
 }
 
 static bool ggml_ocl_device_supports_buft(ggml_backend_dev_t dev, ggml_backend_buffer_type_t buft) {

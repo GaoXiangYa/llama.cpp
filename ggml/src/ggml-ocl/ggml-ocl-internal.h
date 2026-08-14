@@ -259,6 +259,10 @@ struct ocl_op {
                 const ggml_tensor * s1, ggml_tensor * dst) = nullptr;
 };
 
+// ops module (ggml-ocl-ops.cpp)
+bool ocl_op_dispatch(ggml_ocl_backend * b, ggml_tensor * node);
+bool ocl_op_supports(const ggml_ocl_caps * caps, const ggml_tensor * node);
+
 // ---------------------------------------------------------------------------
 // vendor (DESIGN.md section 20; 定义在 vendor/vendor.h, 此处前向声明)
 // ---------------------------------------------------------------------------
@@ -282,6 +286,40 @@ struct ocl_stats {
     void print() const;
 };
 #endif // GGML_OCL_PROFILING
+
+// ---------------------------------------------------------------------------
+// kernel call wrapper (DESIGN.md section 17.1; 实现与队列工具在 ggml-ocl-exec.cpp)
+// 参数顺序约定 (DESIGN.md 21.2): src0, off0, src1, off1, dst, offd, 形状..., 步长...
+// ---------------------------------------------------------------------------
+
+struct ocl_kernel_call {
+    cl_kernel kernel = nullptr;
+    cl_uint   ndims  = 1;
+    size_t    global[3] = {0, 0, 1};
+    size_t    local[3]  = {0, 0, 1};
+
+    const char * op_name = nullptr;      // profiling 用 (可空)
+
+    union ocl_arg { cl_mem mem; cl_ulong u64; cl_int i32; cl_float f32; };
+    ocl_arg args[32] = {};
+    size_t  arg_sizes[32] = {};
+    int     arg_idx = 0;
+
+    void arg_cl_mem(cl_mem v) { args[arg_idx].mem = v;  arg_sizes[arg_idx] = sizeof(cl_mem);   arg_idx++; }
+    void arg_u64(cl_ulong v)  { args[arg_idx].u64 = v;  arg_sizes[arg_idx] = sizeof(cl_ulong); arg_idx++; }
+    void arg_i32(cl_int v)    { args[arg_idx].i32 = v;  arg_sizes[arg_idx] = sizeof(cl_int);   arg_idx++; }
+    void arg_f32(cl_float v)  { args[arg_idx].f32 = v;  arg_sizes[arg_idx] = sizeof(cl_float); arg_idx++; }
+
+    // 提交到 compute 队列; profiling 开启时同步结算耗时
+    void enqueue(ggml_ocl_backend * backend, cl_event * evt_out = nullptr);
+};
+
+// ---------------------------------------------------------------------------
+// exec 队列工具 (DESIGN.md sections 17.2/17.3)
+// ---------------------------------------------------------------------------
+
+void ocl_exec_wait_pending_copies(ggml_ocl_backend * backend);
+void ocl_exec_flush(ggml_ocl_backend * backend);
 
 // ---------------------------------------------------------------------------
 // backend main structure (DESIGN.md section 12.2)

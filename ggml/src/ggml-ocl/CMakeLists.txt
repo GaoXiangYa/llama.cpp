@@ -8,9 +8,13 @@ ggml_add_backend_library(${TARGET_NAME}
                          ggml-ocl-caps.cpp
                          ggml-ocl-mem.cpp
                          ggml-ocl-kernels.cpp
+                         ggml-ocl-exec.cpp
+                         ggml-ocl-ops.cpp
+                         ops/op-eltwise.cpp
                          ../../include/ggml-ocl.h)
 target_link_libraries(${TARGET_NAME} PRIVATE ${OpenCL_LIBRARIES})
 target_include_directories(${TARGET_NAME} PRIVATE ${OpenCL_INCLUDE_DIRS})
+target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 option(GGML_OCL_EMBED_KERNELS "Embed OpenCL kernels into the executable" ON)
 option(GGML_OCL_PROFILING     "OpenCL profiling (CPU overhead)" OFF)

@@ -200,8 +200,14 @@ static void ggml_ocl_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor
     GGML_ASSERT(extra->layout == LAYOUT_AOS && "SoA-DM arrives in S6");
 
     cl_ulong eff_offset = extra->offset + tensor->view_offs + offset;
+    cl_event evt = nullptr;
     OCL_CHECK(clEnqueueWriteBuffer(backend->q_copy, extra->data_device, CL_FALSE,
-                                   eff_offset, size, data, 0, nullptr, nullptr));
+                                   eff_offset, size, data, 0, nullptr, &evt));
+    // 记录到 copy 事件列表: S8 的 graph 首节点等待; 超限强制结算防泄漏
+    backend->pending_copy_events.push_back(evt);
+    if (backend->pending_copy_events.size() >= 32) {
+        ocl_exec_wait_pending_copies(backend);
+    }
 }
 
 static void ggml_ocl_buffer_get_tensor(ggml_backend_buffer_t buffer, const ggml_tensor * tensor,
