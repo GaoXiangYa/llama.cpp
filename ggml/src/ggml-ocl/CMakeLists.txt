@@ -55,7 +55,7 @@ endfunction()
 
 # 首批 kernel: add (S5 起按需扩充; 全部 .cl 源必须在启动期编译, 变体数量收敛)
 set(GGML_OCL_KERNELS
-    misc/add
+    add/add
 )
 
 foreach (K ${GGML_OCL_KERNELS})

@@ -4,10 +4,10 @@
 
 #include "ggml-ocl-internal.h"
 
-extern const ocl_op ocl_ops_op_eltwise[];
+extern const ocl_op ocl_ops_op_add[];
 
 static const ocl_op * g_op_groups[] = {
-    ocl_ops_op_eltwise,
+    ocl_ops_op_add,
 };
 
 bool ocl_op_dispatch(ggml_ocl_backend * b, ggml_tensor * node) {
