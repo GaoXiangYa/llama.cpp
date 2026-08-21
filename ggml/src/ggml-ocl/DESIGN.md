@@ -1135,7 +1135,7 @@ kernels/
 
 命名规则：文件 = 逻辑组；kernel 函数名 = 注册名（src_id 用文件名）；`.cl` 由 embed 脚本生成 `.cl.h`（沿用 ggml-opencl 的 embed_kernel.py 机制）。
 
-### 21.2 kernel 编写规范（10 条）
+### 21.2 kernel 编写规范（11 条）
 
 1. **参数顺序统一**：`(src0, off0, src1, off1, dst, offd, 形状..., 步长..., 标量...)`；所有 buffer 参数为 `global uchar*` + `ulong` 偏移，kernel 内首行做偏移换算；
 2. **wavefront 对齐**：`local size` 恒为 64 倍数；主循环以 `get_local_id(0)` 起步、`get_local_size(0)` 步进；
@@ -1148,7 +1148,40 @@ kernels/
 9. **头注释模板**：目的 / 输入输出 / 对齐要求 / 占用 / 对应设计文档节号；
 10. **新 kernel 门禁**：必须过 harness 数值 + 计时（23 节）才可提交。
 
-### 21.3 第一批评审清单（M1-M2 交付）
+### 21.3 变量命名细则（ggml 全局惯例，2026-08 修订）
+
+**1. Kernel 参数：`ne`/`nb` 前缀 + 三套数字域**
+
+| 域 | 含义 | 示例 |
+|---|---|---|
+| `ne00..ne03` / `nb00..nb03` | src0 形状 / stride | `ne01` = src0 第 1 维大小, `nb03` = src0 第 3 维 stride |
+| `ne10..ne13` / `nb10..nb13` | src1 形状 / stride | `nb11` = src1 第 1 维 stride |
+| `ne0..ne3` / `nb0..nb3` | dst 形状 / stride | `nb2` = dst 第 2 维 stride |
+
+- 第一个数字 = 维度号；第二个数字域（0/1/d）区分 src0/src1/dst；
+- 参数必须**完整**（三套 ne/nb 全传），缺失会迫使 kernel 误用其他 buffer 的 stride（曾导致 `dst_ptr` 误用 `nb11` 写 dst 的 bug）；
+- `offset0/offset1/offsetd` 为 cl_mem 内字节偏移（不含 view_offs）。
+
+**2. 索引变量**
+
+| 变量 | 含义 |
+|---|---|
+| `i01/i02/i03` | `get_group_id(0/1/2)`（行/批索引） |
+| `i00` | `get_local_id(0)` |
+| `i10/i11/i12/i13` | src1 的广播索引（对 src1 各维取模） |
+| `dst_row` 等语义名 | 数据相关量用含义命名，禁用 `gp1` 这类歧义名 |
+
+**3. 指针：`<buffer>_ptr` 前缀**
+
+`src0_ptr` / `src1_ptr` / `dst_ptr`——一眼可辨属于哪个 buffer。
+
+**4. 其他**
+
+- `lsz0` = `get_local_size(0)`；
+- 标量计算量（如 `nblk0`）由 host 计算传入，kernel 内不做 `ggml_*` 调用；
+- kernel 内禁用 host 宏（`GGML_ASSERT`、`ggml_blck_size_*` 等）——OpenCL C 无这些符号。
+
+### 21.4 第一批评审清单（M1-M2 交付）
 
 | kernel | 归属 | 优先级 |
 |---|---|---|
@@ -1197,54 +1230,62 @@ add_compile_definitions(GGML_OCL_TARGET_VERSION=${GGML_OPENCL_TARGET_VERSION})
 
 接入方式：在 `ggml/src/CMakeLists.txt` 增加 `ggml_add_backend(ggml-ocl)` 分支（与 ggml-opencl 并列，`GGML_OCL` 选项），deps 不含 CUDA/HIP。
 
-## 23. kernel harness 详细设计 (tools/ocl-kernel-test)
+## 23. 算子级测试工具详细设计 (tools/ocl-kernel-test)
 
-### 23.1 目录与模块
+### 23.1 设计原则（算子级，非 kernel 级）
+
+测试粒度为**算子**：用例用 ggml 公开 API 构造算子图（如 `ggml_add`），在
+ggml-ocl backend 执行，再在同一 build 函数下用 ggml-cpu backend 执行，比较两个
+backend 的输出。用例不接触 kernel 内部（无需手动设 buffer/kernel 参数），
+天然覆盖完整调度链路（supports_op -> sched -> graph_compute -> kernel）。
+
+> 设计变更记录：v0.4 文档原设计为 kernel 级 harness（直接调 cl API、手动设参），
+> S9 实现时按 review 意见改为算子级——kernel 级微基准留待性能调优阶段（S14+）
+> 按需补充。
+
+### 23.2 目录与模块
 
 ```
 tools/ocl-kernel-test/
-├── main.cpp            # CLI: <kernel 名> [--shape] [--seed] [--iter]
-├── case-registry.h     # REGISTER_CASE(name) 宏注册表
-├── driver.cpp          # OpenCL 环境 (创建 context/queue, 加载 caps)
-├── ref/                # CPU 参考实现 (直接复用 ggml 的 quantize/dequantize/dot)
-├── compare.cpp         # 逐元素比较: 绝对/相对容差, 输出首个差异位置与统计
-├── metrics.cpp         # 计时 -> 带宽 GB/s 与利用率 % (对照 caps 常量带宽)
+├── main.cpp            # CLI: ocl-op-test <op-name|all> [--seed=N]
+├── test-op.h           # OCL_OP_TEST 宏 + ocl_op_eval/ocl_op_compare 辅助
 └── cases/
-    ├── gemv_q4_1.cpp
-    ├── gemm_f16.cpp
-    ├── fa_decode_f16.cpp
-    ├── rms_norm.cpp
+    ├── add.cpp         # 用例示例 (纯 ggml 公开 API)
+    ├── set_rows.cpp    # SET_ROWS (I64 索引输入, 自定义 fill)
     └── ...
 ```
 
-### 23.2 用例模板
+### 23.3 用例模板
 
 ```cpp
-REGISTER_CASE(gemv_q4_1) {
-    for (int n : {2048, 11008, 151936}) {          // Qwen3 三类行数
-        for (int k : {2048}) {
-            run_case("gemv_q4_1", n, k, /*seed=*/42);
-        }
+// cases/add.cpp: 纯 ggml 公开 API
+OCL_OP_TEST(add) {
+    bool all_ok = true;
+    for (shape : shapes) {
+        // 1. 构造算子图 (build 回调, OCL/CPU 复用)
+        auto gpu = ocl_op_eval(backend_ocl, build_add, &shape, seed);
+        auto cpu = ocl_op_eval(backend_cpu, build_add, &shape, seed);
+        // 2. 比较 (相对误差 <= 1e-5)
+        all_ok &= ocl_op_compare(gpu, cpu, &max_rel_err);
+        printf("  add[...]: %s (max_rel_err=%.2e)\n", ok ? "PASS" : "FAIL", ...);
     }
+    return all_ok;
 }
-// run_case 内部:
-//   1. 生成随机权重 (f32) -> 用 ggml 参考量化到 q4_1
-//   2. 生成激活 f32; CPU 参考 dot 计算期望
-//   3. 设备执行 kernel; 比较 (相对误差 <= 2e-5)
-//   4. 计时 -> 打印: n, k, 耗时, 带宽 GB/s, 利用率 %
+// ocl_op_eval 内部: 建 ctx -> build -> 分配 -> 叶子填输入 -> compute -> 读输出 -> 清理
+// 输入填充: 默认 F32 随机 [-1,1]; 需要 I32/I64 等输入时用例传 fill 回调 (如 set_rows)
 ```
 
-### 23.3 容差策略
+### 23.4 容差与退出码
 
-| 场景 | 容差 |
+| 项 | 值 |
 |---|---|
-| fp32 累加点积 (gemv/gemm) | 相对误差 <= 2e-5 |
-| fa (softmax 类) | 相对误差 <= 1e-4 |
-| fp16 中间量 | 按 kernel 定义放宽, 与 CPU 参考同口径 |
+| 容差 | 相对误差 <= 1e-5 (双 backend 同为 float 计算, 差异极小) |
+| 退出码 | 全部用例 PASS -> 0; 任一 FAIL -> 1 (main 按 run 返回值统计) |
+| 用例注册 | `OCL_OP_TEST(name)` 宏静态注册, main 按名字过滤 |
 
-### 23.4 定位
+### 23.5 定位
 
-- harness = 正确性 + 微基准（开发期主工具）；
+- ocl-op-test = 算子正确性开发期主工具（GPU vs CPU 双跑对比）；
 - `test-backend-ops` = 全算子回归（集成期）；
 - `llama-bench` = 端到端性能验收（与 8.1 节预算对照）。
 
