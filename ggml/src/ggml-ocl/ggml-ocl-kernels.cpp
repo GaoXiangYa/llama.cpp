@@ -17,13 +17,20 @@ struct ocl_kernel_def {
 };
 
 static const ocl_kernel_def g_kernel_defs[] = {
-    { "misc/add", OCL_KERNEL_GENERIC },
+    { "add/add", OCL_KERNEL_GENERIC },
+    {"set_rows/set_rows", OCL_KERNEL_GENERIC},
 };
 
 static const std::string & ocl_kernel_source(const char * src_id) {
-    if (strcmp(src_id, "misc/add") == 0) {
+    if (strcmp(src_id, "add/add") == 0) {
         static const std::string src {
-#include "misc/add.cl.h"
+#include "add/add.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "set_rows/set_rows") == 0) {
+        static const std::string src {
+#include "set_rows/set_rows.cl.h"
         };
         return src;
     }

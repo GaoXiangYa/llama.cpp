@@ -13,7 +13,7 @@ static bool add_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
 }
 
 static bool add_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
-    cl_kernel k = b->kmgr->get("misc/add", "kernel_add");
+    cl_kernel k = b->kmgr->get("add/add", "kernel_add");
     if (k == nullptr) {
         return false;
     }

@@ -10,7 +10,8 @@ ggml_add_backend_library(${TARGET_NAME}
                          ggml-ocl-kernels.cpp
                          ggml-ocl-exec.cpp
                          ggml-ocl-ops.cpp
-                         ops/op-eltwise.cpp
+                         ops/add.cpp
+                         ops/set_rows.cpp
                          ../../include/ggml-ocl.h)
 target_link_libraries(${TARGET_NAME} PRIVATE ${OpenCL_LIBRARIES})
 target_include_directories(${TARGET_NAME} PRIVATE ${OpenCL_INCLUDE_DIRS})
@@ -56,6 +57,7 @@ endfunction()
 # 首批 kernel: add (S5 起按需扩充; 全部 .cl 源必须在启动期编译, 变体数量收敛)
 set(GGML_OCL_KERNELS
     add/add
+    set_rows/set_rows
 )
 
 foreach (K ${GGML_OCL_KERNELS})

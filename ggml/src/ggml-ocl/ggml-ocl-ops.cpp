@@ -5,9 +5,11 @@
 #include "ggml-ocl-internal.h"
 
 extern const ocl_op ocl_ops_op_add[];
+extern const ocl_op ocl_ops_op_set_rows[];
 
 static const ocl_op * g_op_groups[] = {
     ocl_ops_op_add,
+    ocl_ops_op_set_rows,
 };
 
 bool ocl_op_dispatch(ggml_ocl_backend * b, ggml_tensor * node) {

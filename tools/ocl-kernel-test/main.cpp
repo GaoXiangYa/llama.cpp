@@ -1,6 +1,3 @@
-// ggml-ocl 算子级测试工具 (DESIGN.md section 23)
-// 用法: ocl-op-test <op-name|all> [--seed=N]
-// 每个用例在 ggml-ocl backend 与 ggml-cpu backend 各执行一次并比较结果
 
 #include <cstdio>
 #include <cstring>

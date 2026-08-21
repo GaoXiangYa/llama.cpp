@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <random>
 #include <string>
 #include <vector>
@@ -38,13 +39,14 @@ inline bool ocl_op_test_register(const char * name, bool (*run)(ggml_backend_t, 
     static bool ocl_op_test_##name(ggml_backend_t backend_ocl,                 \
                                    ggml_backend_t backend_cpu, uint32_t seed)
 
-// 算子图构建回调 (用例提供): 用 ggml API 建图, 返回输出 tensor (F32)
 typedef ggml_tensor * (*ocl_op_build_fn)(ggml_context * ctx, ggml_cgraph * graph, void * userdata);
 
-// 在指定 backend 上执行算子图并返回输出 (F32)
-// 流程: 建 ctx -> build -> 分配 -> F32 叶子填随机输入 -> compute -> 读输出 -> 清理
+// 自定义叶子填充 (默认: F32 随机 [-1,1]; 需要 I32/I64 等输入时用例提供)
+using ocl_op_fill_fn = std::function<void(ggml_tensor * t, uint32_t seed)>;
+
 inline std::vector<float> ocl_op_eval(ggml_backend_t backend, ocl_op_build_fn build,
-                                      void * userdata, uint32_t seed) {
+                                      void * userdata, uint32_t seed,
+                                      const ocl_op_fill_fn & fill = nullptr) {
     ggml_init_params params = {
         /*.mem_size   =*/ 512 * 1024,
         /*.mem_buffer =*/ nullptr,
@@ -61,10 +63,13 @@ inline std::vector<float> ocl_op_eval(ggml_backend_t backend, ocl_op_build_fn bu
     ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, backend);
     GGML_ASSERT(buf != nullptr);
 
-    // F32 叶子输入填随机数据 (seed 固定, OCL/CPU 两次 eval 输入一致)
     uint32_t t_idx = 0;
     for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != nullptr; t = ggml_get_next_tensor(ctx, t)) {
         if (t->op != GGML_OP_NONE || t->view_src != nullptr) {
+            continue;
+        }
+        if (fill) {
+            fill(t, seed + t_idx++);
             continue;
         }
         if (t->type != GGML_TYPE_F32) {
@@ -90,7 +95,6 @@ inline std::vector<float> ocl_op_eval(ggml_backend_t backend, ocl_op_build_fn bu
     return res;
 }
 
-// 比较两个 backend 的结果 (相对误差, 默认 1e-5)
 inline bool ocl_op_compare(const std::vector<float> & gpu, const std::vector<float> & cpu,
                            double * max_rel_err_out = nullptr) {
     GGML_ASSERT(gpu.size() == cpu.size());
