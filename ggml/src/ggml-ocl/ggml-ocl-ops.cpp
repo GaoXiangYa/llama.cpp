@@ -1,15 +1,13 @@
-// ggml-ocl backend: operator registry (DESIGN.md section 19.1)
-// 各算子族文件 (ops/*.cpp) 贡献条目数组 (哨兵终止), 本文件统一遍历.
-// 新增算子: 在对应 ops/op-*.cpp 中加条目, 并在 g_op_groups 中登记该文件.
-
 #include "ggml-ocl-internal.h"
 
 extern const ocl_op ocl_ops_op_add[];
 extern const ocl_op ocl_ops_op_set_rows[];
+extern const ocl_op ocl_ops_op_get_rows[];
 
 static const ocl_op * g_op_groups[] = {
     ocl_ops_op_add,
     ocl_ops_op_set_rows,
+    ocl_ops_op_get_rows,
 };
 
 bool ocl_op_dispatch(ggml_ocl_backend * b, ggml_tensor * node) {

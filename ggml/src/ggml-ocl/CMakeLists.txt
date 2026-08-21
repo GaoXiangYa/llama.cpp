@@ -12,6 +12,7 @@ ggml_add_backend_library(${TARGET_NAME}
                          ggml-ocl-ops.cpp
                          ops/add.cpp
                          ops/set_rows.cpp
+                         ops/get_rows.cpp
                          ../../include/ggml-ocl.h)
 target_link_libraries(${TARGET_NAME} PRIVATE ${OpenCL_LIBRARIES})
 target_include_directories(${TARGET_NAME} PRIVATE ${OpenCL_INCLUDE_DIRS})
@@ -58,6 +59,7 @@ endfunction()
 set(GGML_OCL_KERNELS
     add/add
     set_rows/set_rows
+    get_rows/get_rows
 )
 
 foreach (K ${GGML_OCL_KERNELS})
