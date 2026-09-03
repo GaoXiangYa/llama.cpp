@@ -43,6 +43,10 @@ function(ggml_ocl_add_kernel KNAME)
     if (GGML_OCL_EMBED_KERNELS)
         message(STATUS "ggml-ocl: embedding kernel ${KNAME}")
 
+        # embed_kernel.py 只写文件不创建目录, 需为每个输出头建目录
+        get_filename_component(KERN_HDR_DIR ${KERN_HDR} DIRECTORY)
+        file(MAKE_DIRECTORY ${KERN_HDR_DIR})
+
         # Python must be accessible from command line
         add_custom_command(
             OUTPUT ${KERN_HDR}
