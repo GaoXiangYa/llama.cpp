@@ -5,7 +5,12 @@
 
 namespace ops {
 static bool get_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
-    return true;
+    (void) caps;
+    if (op->op != GGML_OP_GET_ROWS) {
+        return false;
+    }
+    // kernel 仅支持 f32 查表; 量化 embedding 等回 CPU
+    return op->src[0]->type == GGML_TYPE_F32;
 }
 
 static bool get_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {

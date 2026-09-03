@@ -22,6 +22,11 @@ bool ocl_op_dispatch(ggml_ocl_backend * b, ggml_tensor * node) {
             if (o.supports != nullptr && !o.supports(&b->caps, node)) {
                 continue;
             }
+            GGML_LOG_INFO("ggml-ocl: GPU op %s (src0=%s src1=%s) ne=[%lld %lld %lld %lld]\n",
+                          ggml_op_name(node->op), ggml_type_name(node->src[0]->type),
+                          ggml_type_name(node->src[1] ? node->src[1]->type : GGML_TYPE_F32),
+                          (long long) node->ne[0], (long long) node->ne[1],
+                          (long long) node->ne[2], (long long) node->ne[3]);
             return o.run(b, node->src[0], node->src[1], node);
         }
     }

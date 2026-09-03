@@ -6,6 +6,18 @@
 
 namespace ops {
 static bool mul_mat_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
+    (void) caps;
+    if (op->op != GGML_OP_MUL_MAT) {
+        return false;
+    }
+    // gemv kernel 仅支持 f32 x f32 单列 decode (src1: [K, 1]);
+    // Q4_1 等量化权重与 prefill (多列) 回 CPU
+    if (op->src[0]->type != GGML_TYPE_F32 || op->src[1]->type != GGML_TYPE_F32) {
+        return false;
+    }
+    if (op->src[1]->ne[1] != 1) {
+        return false;
+    }
     return true;
 }
 
@@ -77,14 +89,13 @@ static bool gemv_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_
 }
 
 static bool mul_mat_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
-    if (dst->ne[1] == 1) {
-        return gemv_run(b, src0, src1, dst);
-    }
-    return true;
+    // supports 已保证: f32 x f32 单列 (dst->ne[1] == 1)
+    return gemv_run(b, src0, src1, dst);
 }
 
 }  // namespace ops
 
 extern const ocl_op ocl_ops_op_mul_mat[] = {
     { GGML_OP_MUL_MAT, 0, ops::mul_mat_supports, ops::mul_mat_run },
+    { GGML_OP_NONE, 0, nullptr, nullptr },   // 哨兵终止 (遍历依赖)
 };
