@@ -9,6 +9,7 @@ add_executable(${TARGET}
     cases/add.cpp
     cases/set_rows.cpp
     cases/get_rows.cpp
+    cases/mul_mat.cpp
 )
 target_include_directories(${TARGET} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

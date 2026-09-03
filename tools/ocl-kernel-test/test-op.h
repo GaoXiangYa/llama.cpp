@@ -110,3 +110,20 @@ inline bool ocl_op_compare(const std::vector<float> & gpu, const std::vector<flo
     }
     return max_rel_err <= 1e-5;
 }
+
+// NMSE 比较 (与 test-backend-ops 一致): 归一化均方误差, 对累加顺序差异不敏感, 适合点积类算子
+inline bool ocl_op_compare_nmse(const std::vector<float> & gpu, const std::vector<float> & cpu,
+                                double nmse_tol, double * nmse_out = nullptr) {
+    GGML_ASSERT(gpu.size() == cpu.size());
+    double sse = 0.0, sse_ref = 0.0;
+    for (size_t i = 0; i < gpu.size(); i++) {
+        const double d = (double) gpu[i] - (double) cpu[i];
+        sse     += d * d;
+        sse_ref += (double) cpu[i] * (double) cpu[i];
+    }
+    const double nmse = sse_ref > 0.0 ? sse / sse_ref : 0.0;
+    if (nmse_out) {
+        *nmse_out = nmse;
+    }
+    return nmse <= nmse_tol;
+}
