@@ -66,6 +66,7 @@ set(GGML_OCL_KERNELS
     set_rows/set_rows
     get_rows/get_rows
     mul_mat/gemv
+    mul_mat/gemv_q4_1
 )
 
 foreach (K ${GGML_OCL_KERNELS})

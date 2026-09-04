@@ -301,8 +301,8 @@ struct ocl_kernel_call {
     const char * op_name = nullptr;      // profiling 用 (可空)
 
     union ocl_arg { cl_mem mem; cl_ulong u64; cl_int i32; cl_float f32; };
-    ocl_arg args[32] = {};
-    size_t  arg_sizes[32] = {};
+    ocl_arg args[64] = {};   // 上限 64 参数 (gemv_q4_1 需 33)
+    size_t  arg_sizes[64] = {};
     int     arg_idx = 0;
 
     void arg_cl_mem(cl_mem v) { args[arg_idx].mem = v;  arg_sizes[arg_idx] = sizeof(cl_mem);   arg_idx++; }

@@ -14,6 +14,7 @@ static const ocl_kernel_def g_kernel_defs[] = {
     { "set_rows/set_rows", OCL_KERNEL_GENERIC },
     { "get_rows/get_rows", OCL_KERNEL_GENERIC },
     { "mul_mat/gemv",       OCL_KERNEL_GENERIC },
+    { "mul_mat/gemv_q4_1", OCL_KERNEL_GENERIC },
 };
 
 static const std::string & ocl_kernel_source(const char * src_id) {
@@ -38,6 +39,12 @@ static const std::string & ocl_kernel_source(const char * src_id) {
     if (strcmp(src_id, "mul_mat/gemv") == 0) {
         static const std::string src{
 #include "mul_mat/gemv.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "mul_mat/gemv_q4_1") == 0) {
+        static const std::string src{
+#include "mul_mat/gemv_q4_1.cl.h"
         };
         return src;
     }
