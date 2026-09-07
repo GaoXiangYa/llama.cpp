@@ -8,7 +8,8 @@ static bool set_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op
 }
 
 static bool set_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
-    cl_kernel k = b->kmgr->get("set_rows/set_rows", "set_rows_f32_i64_f32");
+    const char* kernel_name = dst->type == GGML_TYPE_F32 ? "set_rows_f32_i64_f32" : "set_rows_f16_i64_f16";
+    cl_kernel k = b->kmgr->get("set_rows/set_rows", kernel_name);
     if (k == nullptr) {
         return false;
     }
