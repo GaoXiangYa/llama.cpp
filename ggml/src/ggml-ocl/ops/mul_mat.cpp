@@ -10,13 +10,12 @@ static bool mul_mat_supports(const ggml_ocl_caps * caps, const ggml_tensor * op)
     if (op->op != GGML_OP_MUL_MAT) {
         return false;
     }
-    // gemv kernel 仅支持 f32 x f32 单列 decode (src1: [K, 1]);
-    // Q4_1 等量化权重与 prefill (多列) 回 CPU
     if ((op->src[0]->type != GGML_TYPE_F32 && op->src[0]->type != GGML_TYPE_Q4_1) ||
         op->src[1]->type != GGML_TYPE_F32) {
         return false;
     }
-    if (op->src[1]->ne[1] != 1) {
+    // 多列 (prefill) 仅 f32 gemm kernel; Q4_1 多列回 CPU (暂无 q4_1 gemm)
+    if (op->src[1]->ne[1] > 1 && op->src[0]->type != GGML_TYPE_F32) {
         return false;
     }
     return true;
@@ -54,11 +53,9 @@ static bool gemv_q4_1_run(ggml_ocl_backend * b, const ggml_tensor * src0, const 
     cl_ulong offset1 = e1->offset + src1->view_offs;
     cl_ulong offsetd = ed->offset + dst->view_offs;
 
-    constexpr int blk_k = 32;
-    // 每行 K 元素 = K/32 个 Q4_1 块 (K = ne00 内维, 非 ne0 输出行数)
-    const int blks_per_row = ne00 / blk_k;
-    // Q4_1 block: half d (2B) + half m (2B) + 16B quants = 20 B
-    constexpr int blk_bytes = 20;
+    constexpr int blk_k        = 32;
+    const int     blks_per_row = ne00 / blk_k;
+    constexpr int blk_bytes    = 20;
 
     call.arg_cl_mem(e0->data_device);
     call.arg_u64(offset0);
@@ -165,12 +162,84 @@ static bool gemv_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_
     return true;
 }
 
-static bool mul_mat_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
-    // supports 已保证: f32 x f32 单列 (dst->ne[1] == 1)
-    if (src0->type == GGML_TYPE_Q4_1) {
-        return gemv_q4_1_run(b, src0, src1, dst);
+static bool gemm_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
+    cl_kernel k = b->kmgr->get("mul_mat/gemm", "gemm");
+    if (k == nullptr) {
+        return false;
     }
-    return gemv_run(b, src0, src1, dst);
+
+    GGML_TENSOR_BINARY_OP_LOCALS;
+    ocl_kernel_call call;
+    call.kernel  = k;
+    call.op_name = "MUL_MAT";
+    call.ndims   = 3;
+
+    constexpr int nth = 256;
+    call.local[0]     = nth;
+    call.local[1]     = 1;
+    call.local[2]     = 1;
+
+    constexpr int bm = 16;
+    constexpr int bn = 16;
+    const int num_wg_m = (ne1 + bm - 1) / bm;   // token 方向组数
+    const int num_wg_n = (ne0 + bn - 1) / bn;   // neuron 方向组数
+    const int num_groups = num_wg_m * num_wg_n;
+    call.global[0]               = num_groups * nth;
+    call.global[1]               = ne2;
+    call.global[2]               = ne3;
+
+    ggml_ocl_tensor_extra * e0 = (ggml_ocl_tensor_extra *) src0->extra;
+    ggml_ocl_tensor_extra * e1 = (ggml_ocl_tensor_extra *) src1->extra;
+    ggml_ocl_tensor_extra * ed = (ggml_ocl_tensor_extra *) dst->extra;
+
+    cl_ulong offset0 = e0->offset + src0->view_offs;
+    cl_ulong offset1 = e1->offset + src1->view_offs;
+    cl_ulong offsetd = ed->offset + dst->view_offs;
+
+    call.arg_cl_mem(e0->data_device);
+    call.arg_u64(offset0);
+    call.arg_cl_mem(e1->data_device);
+    call.arg_u64(offset1);
+    call.arg_cl_mem(ed->data_device);
+    call.arg_u64(offsetd);
+    call.arg_i32(ne00);
+    call.arg_i32(ne01);
+    call.arg_i32(ne02);
+    call.arg_i32(ne03);
+    call.arg_i32(nb00);
+    call.arg_i32(nb01);
+    call.arg_i32(nb02);
+    call.arg_i32(nb03);
+    call.arg_i32(ne10);
+    call.arg_i32(ne11);
+    call.arg_i32(ne12);
+    call.arg_i32(ne13);
+    call.arg_i32(nb10);
+    call.arg_i32(nb11);
+    call.arg_i32(nb12);
+    call.arg_i32(nb13);
+    call.arg_i32(ne0);
+    call.arg_i32(ne1);
+    call.arg_i32(ne2);
+    call.arg_i32(ne3);
+    call.arg_i32(nb0);
+    call.arg_i32(nb1);
+    call.arg_i32(nb2);
+    call.arg_i32(nb3);
+    call.arg_i32(num_wg_n);
+
+    call.enqueue(b);
+    return true;
+}
+
+static bool mul_mat_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
+    if (dst->ne[1] == 1) {
+        if (src0->type == GGML_TYPE_Q4_1) {
+            return gemv_q4_1_run(b, src0, src1, dst);
+        }
+        return gemv_run(b, src0, src1, dst);
+    }
+    return gemm_run(b, src0, src1, dst);
 }
 
 }  // namespace ops
