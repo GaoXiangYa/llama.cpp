@@ -36,8 +36,8 @@ kernel void gemm(
     const int lane_row = lane_id >> 3;
     const int lane_col = lane_id & 7;
 
-    local float lA[BM * BK];
-    local float lB[BN * BK];
+    local float lA[BK * BN];
+    local float lB[BK * BM];
 
     const int group_row = i0 / num_groups;
     const int group_col = i0 % num_groups;

@@ -68,6 +68,7 @@ set(GGML_OCL_KERNELS
     mul_mat/gemv
     mul_mat/gemv_q4_1
     mul_mat/gemm
+    mul_mat/gemm_q4_1
 )
 
 foreach (K ${GGML_OCL_KERNELS})

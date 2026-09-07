@@ -149,3 +149,36 @@ OCL_OP_TEST(gemm) {
     }
     return all_ok;
 }
+
+// ggml-ocl op test: MUL_MAT 多列 prefill + Q4_1 权重 (gemm_q4_1)
+
+static ggml_tensor * build_gemm_q4_1(ggml_context * ctx, ggml_cgraph * graph, void * userdata) {
+    const mm_shape * s = (const mm_shape *) userdata;
+    ggml_tensor * w = ggml_new_tensor_2d(ctx, GGML_TYPE_Q4_1, s->k, s->n);
+    ggml_tensor * x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, s->k, s->m);
+    ggml_tensor * out = ggml_mul_mat(ctx, w, x);
+    ggml_build_forward_expand(graph, out);
+    return out;
+}
+
+OCL_OP_TEST(gemm_q4_1) {
+    const mm_shape cases[] = {
+        { 2048, 2048, 8 },
+        { 2048, 11008, 4 },
+        { 11008, 2048, 16 },
+        { 128, 512, 32 },
+    };
+    bool all_ok = true;
+    for (const mm_shape & s : cases) {
+        ocl_op_fill_fn fill;
+        make_fill_q4_1(fill);
+        const std::vector<float> gpu = ocl_op_eval(backend_ocl, build_gemm_q4_1, (void *) &s, seed, fill);
+        const std::vector<float> cpu = ocl_op_eval(backend_cpu, build_gemm_q4_1, (void *) &s, seed, fill);
+        double nmse = 0.0;
+        const bool ok = ocl_op_compare_nmse(gpu, cpu, 1e-4, &nmse);
+        all_ok &= ok;
+        printf("  gemm_q4_1[K=%5lld, N=%5lld, M=%3lld]: %s (nmse=%.2e, n=%zu)\n",
+               (long long) s.k, (long long) s.n, (long long) s.m, ok ? "PASS" : "FAIL", nmse, gpu.size());
+    }
+    return all_ok;
+}
