@@ -15,6 +15,7 @@ ggml_add_backend_library(${TARGET_NAME}
                          ops/get_rows.cpp
                          ops/mul_mat.cpp
                          ops/softmax.cpp
+                         ops/rmsnorm.cpp
                          ../../include/ggml-ocl.h)
 target_link_libraries(${TARGET_NAME} PRIVATE ${OpenCL_LIBRARIES})
 target_include_directories(${TARGET_NAME} PRIVATE ${OpenCL_INCLUDE_DIRS})
@@ -71,6 +72,7 @@ set(GGML_OCL_KERNELS
     mul_mat/gemm
     mul_mat/gemm_q4_1
     softmax/softmax
+    rmsnorm/rmsnorm
 )
 
 foreach (K ${GGML_OCL_KERNELS})
