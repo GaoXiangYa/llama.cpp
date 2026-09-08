@@ -6,6 +6,7 @@ extern const ocl_op ocl_ops_op_get_rows[];
 extern const ocl_op ocl_ops_op_mul_mat[];
 extern const ocl_op ocl_ops_op_softmax[];
 extern const ocl_op ocl_ops_op_rmsnorm[];
+extern const ocl_op ocl_ops_op_glu[];
 
 static const ocl_op * g_op_groups[] = {
     ocl_ops_op_add,
@@ -14,6 +15,7 @@ static const ocl_op * g_op_groups[] = {
     ocl_ops_op_mul_mat,
     ocl_ops_op_softmax,
     ocl_ops_op_rmsnorm,
+    ocl_ops_op_glu,
 };
 
 bool ocl_op_dispatch(ggml_ocl_backend * b, ggml_tensor * node) {

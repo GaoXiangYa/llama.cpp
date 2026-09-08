@@ -19,6 +19,7 @@ static const ocl_kernel_def g_kernel_defs[] = {
     { "mul_mat/gemm_q4_1", OCL_KERNEL_GENERIC },
     { "softmax/softmax",   OCL_KERNEL_GENERIC },
     { "rmsnorm/rmsnorm",   OCL_KERNEL_GENERIC },
+    { "glu/glu",   OCL_KERNEL_GENERIC },
 };
 
 static const std::string & ocl_kernel_source(const char * src_id) {
@@ -73,6 +74,12 @@ static const std::string & ocl_kernel_source(const char * src_id) {
     if (strcmp(src_id, "rmsnorm/rmsnorm") == 0) {
         static const std::string src{
 #include "rmsnorm/rmsnorm.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "glu/glu") == 0) {
+        static const std::string src{
+#include "glu/glu.cl.h"
         };
         return src;
     }

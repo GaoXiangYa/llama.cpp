@@ -12,6 +12,7 @@ add_executable(${TARGET}
     cases/mul_mat.cpp
     cases/softmax.cpp
     cases/rmsnorm.cpp
+    cases/glu.cpp
 )
 target_include_directories(${TARGET} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
