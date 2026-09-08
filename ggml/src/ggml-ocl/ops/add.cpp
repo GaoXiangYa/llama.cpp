@@ -79,4 +79,5 @@ static bool add_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_ten
 
 extern const ocl_op ocl_ops_op_add[] = {
     { GGML_OP_ADD, 0, ops::add_supports, ops::add_run },
+    { GGML_OP_NONE, 0, nullptr, nullptr }, // 哨兵终止
 };

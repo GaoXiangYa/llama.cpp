@@ -70,4 +70,5 @@ static bool get_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const g
 
 extern const ocl_op ocl_ops_op_get_rows[] = {
     { GGML_OP_GET_ROWS, 0, ops::get_rows_supports, ops::get_rows_run },
+    { GGML_OP_NONE,     0, nullptr,                nullptr }, // 哨兵终止
 };

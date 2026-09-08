@@ -78,4 +78,5 @@ static bool set_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const g
 
 extern const ocl_op ocl_ops_op_set_rows[] = {
     { GGML_OP_SET_ROWS, 0, ops::set_rows_supports, ops::set_rows_run },
+    { GGML_OP_NONE,     0, nullptr,                nullptr }, // 哨兵终止
 };
