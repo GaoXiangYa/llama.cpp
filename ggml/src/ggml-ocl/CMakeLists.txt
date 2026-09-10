@@ -18,6 +18,7 @@ ggml_add_backend_library(${TARGET_NAME}
                          ops/rmsnorm.cpp
                          ops/glu.cpp
                          ops/mul.cpp
+                         ops/rope.cpp
                          ../../include/ggml-ocl.h)
 target_link_libraries(${TARGET_NAME} PRIVATE ${OpenCL_LIBRARIES})
 target_include_directories(${TARGET_NAME} PRIVATE ${OpenCL_INCLUDE_DIRS})
@@ -79,6 +80,7 @@ set(GGML_OCL_KERNELS
     rmsnorm/rmsnorm
     glu/glu
     mul/mul
+    rope/rope
 )
 
 foreach (K ${GGML_OCL_KERNELS})

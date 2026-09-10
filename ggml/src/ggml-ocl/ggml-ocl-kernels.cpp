@@ -104,6 +104,12 @@ static const std::string & ocl_kernel_source(const char * src_id) {
         };
         return src;
     }
+    if (strcmp(src_id, "rope/rope") == 0) {
+        static const std::string src{
+#include "rope/rope.cl.h"
+        };
+        return src;
+    }
     GGML_ABORT("ggml-ocl: unknown kernel source '%s'", src_id);
 }
 

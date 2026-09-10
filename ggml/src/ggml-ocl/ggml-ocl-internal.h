@@ -5,6 +5,8 @@
 #include "ggml-backend.h"
 #include "ggml-impl.h"
 #include "ggml.h"
+#include <CL/cl_platform.h>
+#include <openssl/params.h>
 
 #define CL_TARGET_OPENCL_VERSION GGML_OCL_TARGET_VERSION
 #include <CL/cl.h>
@@ -317,6 +319,7 @@ struct ocl_kernel_call {
         cl_ulong u64;
         cl_int   i32;
         cl_float f32;
+        cl_int4  i32x4;
     };
 
     ocl_arg args[64]      = {};  // 上限 64 参数 (gemv_q4_1 需 33)
@@ -338,6 +341,12 @@ struct ocl_kernel_call {
     void arg_i32(cl_int v) {
         args[arg_idx].i32  = v;
         arg_sizes[arg_idx] = sizeof(cl_int);
+        arg_idx++;
+    }
+
+    void arg_i32x4(cl_int4 v) {
+        args[arg_idx].i32x4 = v;
+        arg_sizes[arg_idx] = sizeof(int32_t) * 4;
         arg_idx++;
     }
 
