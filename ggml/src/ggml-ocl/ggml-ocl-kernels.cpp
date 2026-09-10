@@ -10,16 +10,18 @@ struct ocl_kernel_def {
 };
 
 static const ocl_kernel_def g_kernel_defs[] = {
-    { "add/add",           OCL_KERNEL_GENERIC },
-    { "set_rows/set_rows", OCL_KERNEL_GENERIC },
-    { "get_rows/get_rows", OCL_KERNEL_GENERIC },
-    { "mul_mat/gemv_f32_f32",      OCL_KERNEL_GENERIC },
-    { "mul_mat/gemv_q4_1_f32",     OCL_KERNEL_GENERIC },
-    { "mul_mat/gemm_f32_f32",      OCL_KERNEL_GENERIC },
-    { "mul_mat/gemm_q4_1_f32",     OCL_KERNEL_GENERIC },
-    { "softmax/softmax",   OCL_KERNEL_GENERIC },
-    { "rmsnorm/rmsnorm",   OCL_KERNEL_GENERIC },
-    { "glu/glu",   OCL_KERNEL_GENERIC },
+    { "add/add",               OCL_KERNEL_GENERIC },
+    { "set_rows/set_rows",     OCL_KERNEL_GENERIC },
+    { "get_rows/get_rows",     OCL_KERNEL_GENERIC },
+    { "mul_mat/gemv_f32_f32",  OCL_KERNEL_GENERIC },
+    { "mul_mat/gemv_q4_1_f32", OCL_KERNEL_GENERIC },
+    { "mul_mat/gemm_f32_f32",  OCL_KERNEL_GENERIC },
+    { "mul_mat/gemm_q4_1_f32", OCL_KERNEL_GENERIC },
+    { "mul_mat/gemv_f16_f32",  OCL_KERNEL_GENERIC },
+    { "mul_mat/gemm_f16_f32",  OCL_KERNEL_GENERIC },
+    { "softmax/softmax",       OCL_KERNEL_GENERIC },
+    { "rmsnorm/rmsnorm",       OCL_KERNEL_GENERIC },
+    { "glu/glu",               OCL_KERNEL_GENERIC },
 };
 
 static const std::string & ocl_kernel_source(const char * src_id) {
@@ -62,6 +64,18 @@ static const std::string & ocl_kernel_source(const char * src_id) {
     if (strcmp(src_id, "mul_mat/gemm_q4_1_f32") == 0) {
         static const std::string src{
 #include "mul_mat/gemm_q4_1_f32.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "mul_mat/gemv_f16_f32") == 0) {
+        static const std::string src{
+#include "mul_mat/gemv_f16_f32.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "mul_mat/gemm_f16_f32") == 0) {
+        static const std::string src{
+#include "mul_mat/gemm_f16_f32.cl.h"
         };
         return src;
     }

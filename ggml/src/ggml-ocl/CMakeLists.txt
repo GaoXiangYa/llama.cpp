@@ -72,6 +72,8 @@ set(GGML_OCL_KERNELS
     mul_mat/gemv_q4_1_f32
     mul_mat/gemm_f32_f32
     mul_mat/gemm_q4_1_f32
+    mul_mat/gemm_f16_f32
+    mul_mat/gemv_f16_f32
     softmax/softmax
     rmsnorm/rmsnorm
     glu/glu
