@@ -155,21 +155,36 @@ struct ggml_ocl_buffer_ctx {
     }
 };
 
-static ggml_ocl_backend * ggml_ocl_buffer_backend(ggml_backend_buffer_t buffer) {
-    ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) buffer->buft->device->context;
-    return dev_ctx->backend;
+static ggml_ocl_device_context * ggml_ocl_buffer_dev_ctx(ggml_backend_buffer_t buffer) {
+    return (ggml_ocl_device_context *) buffer->buft->device->context;
+}
+
+static cl_command_queue ggml_ocl_buffer_copy_queue(ggml_backend_buffer_t buffer) {
+    ggml_ocl_device_context * dev_ctx = ggml_ocl_buffer_dev_ctx(buffer);
+
+    if (dev_ctx->backend != nullptr) {
+        return dev_ctx->backend->q_copy;
+    }
+
+    // 模型加载阶段 backend 还没创建，使用设备级 copy queue
+    if (dev_ctx->q_load == nullptr) {
+        cl_int err = CL_SUCCESS;
+        dev_ctx->q_load = clCreateCommandQueueWithProperties(dev_ctx->context, dev_ctx->device, nullptr, &err);
+        OCL_CHECK(err);
+    }
+    return dev_ctx->q_load;
 }
 
 static void ggml_ocl_buffer_free_buffer(ggml_backend_buffer_t buffer) {
-    ggml_ocl_backend * backend = ggml_ocl_buffer_backend(buffer);
-    backend->mem_allocated -= buffer->size;
+    ggml_ocl_device_context * dev_ctx = ggml_ocl_buffer_dev_ctx(buffer);
+    dev_ctx->mem_allocated -= buffer->size;
     delete (ggml_ocl_buffer_ctx *) buffer->context;
 }
 
 static void * ggml_ocl_buffer_get_base(ggml_backend_buffer_t buffer) {
     // fake base for offset arithmetic; tensor->data = base + offset
-    ggml_ocl_backend * backend = ggml_ocl_buffer_backend(buffer);
-    return (void *) (uintptr_t) backend->caps.alignment;
+    ggml_ocl_device_context * dev_ctx = ggml_ocl_buffer_dev_ctx(buffer);
+    return (void *) (uintptr_t) dev_ctx->alignment;
 }
 
 static enum ggml_status ggml_ocl_buffer_init_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor) {
@@ -194,69 +209,85 @@ static enum ggml_status ggml_ocl_buffer_init_tensor(ggml_backend_buffer_t buffer
 
 static void ggml_ocl_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor,
                                        const void * data, size_t offset, size_t size) {
-    ggml_ocl_backend * backend = ggml_ocl_buffer_backend(buffer);
-    ggml_ocl_tensor_extra * extra = (ggml_ocl_tensor_extra *) tensor->extra;
+    ggml_ocl_device_context * dev_ctx = ggml_ocl_buffer_dev_ctx(buffer);
+    ggml_ocl_backend *        backend  = dev_ctx->backend;
+    ggml_ocl_tensor_extra *   extra    = (ggml_ocl_tensor_extra *) tensor->extra;
     GGML_ASSERT(extra != nullptr);
     GGML_ASSERT(extra->layout == LAYOUT_AOS && "SoA-DM arrives in S6");
 
-    cl_ulong eff_offset = extra->offset + tensor->view_offs + offset;
-    cl_event evt = nullptr;
-    OCL_CHECK(clEnqueueWriteBuffer(backend->q_copy, extra->data_device, CL_FALSE,
-                                   eff_offset, size, data, 0, nullptr, &evt));
+    cl_ulong    eff_offset = extra->offset + tensor->view_offs + offset;
+    cl_event    evt        = nullptr;
+    cl_event *  evt_ptr    = backend ? &evt : nullptr;
+    cl_bool     blocking   = backend ? CL_FALSE : CL_TRUE;
+
+    OCL_CHECK(clEnqueueWriteBuffer(ggml_ocl_buffer_copy_queue(buffer), extra->data_device, blocking,
+                                   eff_offset, size, data, 0, nullptr, evt_ptr));
     // 记录到 copy 事件列表: S8 的 graph 首节点等待; 超限强制结算防泄漏
-    backend->pending_copy_events.push_back(evt);
-    if (backend->pending_copy_events.size() >= 32) {
-        ocl_exec_wait_pending_copies(backend);
+    if (backend) {
+        backend->pending_copy_events.push_back(evt);
+        if (backend->pending_copy_events.size() >= 32) {
+            ocl_exec_wait_pending_copies(backend);
+        }
     }
 }
 
 static void ggml_ocl_buffer_get_tensor(ggml_backend_buffer_t buffer, const ggml_tensor * tensor,
                                        void * data, size_t offset, size_t size) {
-    ggml_ocl_backend * backend = ggml_ocl_buffer_backend(buffer);
     ggml_ocl_tensor_extra * extra = (ggml_ocl_tensor_extra *) tensor->extra;
     GGML_ASSERT(extra != nullptr);
 
     cl_ulong eff_offset = extra->offset + tensor->view_offs + offset;
-    OCL_CHECK(clEnqueueReadBuffer(backend->q_copy, extra->data_device, CL_TRUE,
+    OCL_CHECK(clEnqueueReadBuffer(ggml_ocl_buffer_copy_queue(buffer), extra->data_device, CL_TRUE,
                                   eff_offset, size, data, 0, nullptr, nullptr));
 }
 
 static void ggml_ocl_buffer_memset_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor,
                                           uint8_t value, size_t offset, size_t size) {
-    ggml_ocl_backend * backend = ggml_ocl_buffer_backend(buffer);
-    ggml_ocl_tensor_extra * extra = (ggml_ocl_tensor_extra *) tensor->extra;
+    ggml_ocl_device_context * dev_ctx = ggml_ocl_buffer_dev_ctx(buffer);
+    ggml_ocl_tensor_extra *   extra   = (ggml_ocl_tensor_extra *) tensor->extra;
     GGML_ASSERT(extra != nullptr);
 
-    cl_ulong eff_offset = extra->offset + tensor->view_offs + offset;
-    OCL_CHECK(clEnqueueFillBuffer(backend->q_copy, extra->data_device, &value, sizeof(value),
+    cl_command_queue q = ggml_ocl_buffer_copy_queue(buffer);
+    cl_ulong         eff_offset = extra->offset + tensor->view_offs + offset;
+    OCL_CHECK(clEnqueueFillBuffer(q, extra->data_device, &value, sizeof(value),
                                   eff_offset, size, 0, nullptr, nullptr));
+    if (dev_ctx->backend == nullptr) {
+        OCL_CHECK(clFinish(q));
+    }
 }
 
 static bool ggml_ocl_buffer_cpy_tensor(ggml_backend_buffer_t buffer, const ggml_tensor * src, ggml_tensor * dst) {
     // 仅处理同后端 (同 context) buffer 间的拷贝; 跨后端返回 false, 由 ggml get/set fallback
-    ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) buffer->buft->device->context;
+    ggml_ocl_device_context * dev_ctx = ggml_ocl_buffer_dev_ctx(buffer);
     if (src->buffer->buft->device->context != dev_ctx) {
         return false;
     }
 
-    ggml_ocl_backend * backend = ggml_ocl_buffer_backend(buffer);
     ggml_ocl_tensor_extra * src_extra = (ggml_ocl_tensor_extra *) src->extra;
     ggml_ocl_tensor_extra * dst_extra = (ggml_ocl_tensor_extra *) dst->extra;
     GGML_ASSERT(src_extra != nullptr && dst_extra != nullptr);
     GGML_ASSERT(src_extra->layout == LAYOUT_AOS && dst_extra->layout == LAYOUT_AOS && "SoA-DM arrives in a later step");
 
-    cl_ulong src_off = src_extra->offset + src->view_offs;
-    cl_ulong dst_off = dst_extra->offset + dst->view_offs;
-    OCL_CHECK(clEnqueueCopyBuffer(backend->q_copy, src_extra->data_device, dst_extra->data_device,
+    cl_command_queue q = ggml_ocl_buffer_copy_queue(buffer);
+    cl_ulong         src_off = src_extra->offset + src->view_offs;
+    cl_ulong         dst_off = dst_extra->offset + dst->view_offs;
+    OCL_CHECK(clEnqueueCopyBuffer(q, src_extra->data_device, dst_extra->data_device,
                                   src_off, dst_off, ggml_nbytes(src), 0, nullptr, nullptr));
+    if (dev_ctx->backend == nullptr) {
+        OCL_CHECK(clFinish(q));
+    }
     return true;
 }
 
 static void ggml_ocl_buffer_clear(ggml_backend_buffer_t buffer, uint8_t value) {
-    ggml_ocl_backend * backend = ggml_ocl_buffer_backend(buffer);
-    ggml_ocl_buffer_ctx * ctx = (ggml_ocl_buffer_ctx *) buffer->context;
-    OCL_CHECK(clEnqueueFillBuffer(backend->q_copy, ctx->mem, &value, sizeof(value),
+    ggml_ocl_device_context * dev_ctx = ggml_ocl_buffer_dev_ctx(buffer);
+    ggml_ocl_buffer_ctx *     ctx     = (ggml_ocl_buffer_ctx *) buffer->context;
+    cl_command_queue          q       = ggml_ocl_buffer_copy_queue(buffer);
+    OCL_CHECK(clEnqueueFillBuffer(q, ctx->mem, &value, sizeof(value),
                                   0, ctx->size, 0, nullptr, nullptr));
+    if (dev_ctx->backend == nullptr) {
+        OCL_CHECK(clFinish(q));
+    }
 }
 
 static void ggml_ocl_buffer_reset(ggml_backend_buffer_t buffer) {
@@ -289,8 +320,7 @@ const char * ggml_ocl_buffer_type_get_name(ggml_backend_buffer_type_t buft) {
 
 static ggml_backend_buffer_t ggml_ocl_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft, size_t size) {
     ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) buft->device->context;
-    ggml_ocl_backend * backend = dev_ctx->backend;
-    GGML_ASSERT(backend != nullptr);
+    GGML_ASSERT(dev_ctx->context != nullptr);
 
     // clCreateBuffer returns -61 for size 0
     size = MAX(size, (size_t) 1);
@@ -298,7 +328,7 @@ static ggml_backend_buffer_t ggml_ocl_buffer_type_alloc_buffer(ggml_backend_buff
     // size > max_alloc 由 ggml-alloc 自动拆分为 multi-buffer (ggml-alloc.c),
     // 此处单次分配恒 <= caps.max_alloc
     cl_int err;
-    cl_mem mem = clCreateBuffer(backend->context, CL_MEM_READ_WRITE, size, nullptr, &err);
+    cl_mem mem = clCreateBuffer(dev_ctx->context, CL_MEM_READ_WRITE, size, nullptr, &err);
     if (err != CL_SUCCESS) {
         GGML_LOG_INFO("ggml-ocl: failed to allocate %.2f MiB\n", size / 1024.0 / 1024.0);
         return nullptr;
@@ -306,8 +336,8 @@ static ggml_backend_buffer_t ggml_ocl_buffer_type_alloc_buffer(ggml_backend_buff
 
     GGML_LOG_DEBUG("ggml-ocl: allocated buffer of %.2f MiB (total %.2f MiB)\n",
                    size / 1024.0 / 1024.0,
-                   (backend->mem_allocated + size) / 1024.0 / 1024.0);
-    backend->mem_allocated += size;
+                   (dev_ctx->mem_allocated + size) / 1024.0 / 1024.0);
+    dev_ctx->mem_allocated += size;
 
     ggml_ocl_buffer_ctx * ctx = new ggml_ocl_buffer_ctx(mem, size);
     return ggml_backend_buffer_init(buft, ggml_ocl_buffer_interface, ctx, size);
@@ -315,12 +345,12 @@ static ggml_backend_buffer_t ggml_ocl_buffer_type_alloc_buffer(ggml_backend_buff
 
 static size_t ggml_ocl_buffer_type_get_alignment(ggml_backend_buffer_type_t buft) {
     ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) buft->device->context;
-    return dev_ctx->backend->caps.alignment;
+    return dev_ctx->alignment;
 }
 
 static size_t ggml_ocl_buffer_type_get_max_size(ggml_backend_buffer_type_t buft) {
     ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) buft->device->context;
-    return dev_ctx->backend->caps.max_alloc;
+    return dev_ctx->max_alloc;
 }
 
 static size_t ggml_ocl_buffer_type_get_alloc_size(ggml_backend_buffer_type_t buft, const ggml_tensor * tensor) {

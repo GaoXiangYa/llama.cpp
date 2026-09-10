@@ -132,6 +132,12 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
         size_t global_mem = 0;
         clGetDeviceInfo(d.id, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(global_mem), &global_mem, nullptr);
 
+        size_t max_alloc = 0;
+        clGetDeviceInfo(d.id, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(max_alloc), &max_alloc, nullptr);
+
+        cl_uint align_bits = 0;
+        clGetDeviceInfo(d.id, CL_DEVICE_MEM_BASE_ADDR_ALIGN, sizeof(align_bits), &align_bits, nullptr);
+
         auto dev_ctx = std::unique_ptr<ggml_ocl_device_context>(new ggml_ocl_device_context{
             /* .platform        = */ d.platform,
             /* .device          = */ d.id,
@@ -144,6 +150,14 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
             /* .backend         = */ nullptr,
             /* .buffer_type     = */ {},
         });
+
+        dev_ctx->max_alloc = max_alloc;
+        dev_ctx->alignment = align_bits > 0 ? align_bits / 8 : 128;
+
+        // 权重加载阶段 backend 尚未创建，需要一个设备级 copy queue 上传权重
+        cl_int qerr = CL_SUCCESS;
+        dev_ctx->q_load = clCreateCommandQueueWithProperties(shared_context, d.id, nullptr, &qerr);
+        OCL_CHECK(qerr);
 
         found.push_back(ggml_backend_device{
             /* .iface   = */ ggml_ocl_device_interface,
@@ -216,9 +230,6 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
             default:
                 break;
         }
-        if (node->op == GGML_OP_GLU) {
-            printf("glu op!\n");
-        }
         if ((node->flags & GGML_TENSOR_FLAG_COMPUTE) == 0) {
             continue;
         }
@@ -268,16 +279,9 @@ static void ggml_ocl_device_get_memory(ggml_backend_dev_t dev, size_t * free, si
     ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) dev->context;
 
     *total = dev_ctx->global_mem_size;
-    if (dev_ctx->backend != nullptr) {
-        // 记账值 (DESIGN.md 16.5); multi-buffer 拆分由 ggml-alloc 处理
-        *free = *total > dev_ctx->backend->mem_allocated
-                    ? *total - dev_ctx->backend->mem_allocated
-                    : 0;
-    } else {
-        // backend 未初始化 (设备枚举阶段): 用 global size 减 1 GiB 余量兜底
-        static const size_t margin = 1ull * 1024 * 1024 * 1024;
-        *free = *total > margin ? *total - margin : 0;
-    }
+    // 记账值 (DESIGN.md 16.5); multi-buffer 拆分由 ggml-alloc 处理
+    // 模型加载阶段 backend 可能还没创建，所以统一使用 dev_ctx->mem_allocated
+    *free = *total > dev_ctx->mem_allocated ? *total - dev_ctx->mem_allocated : 0;
 }
 
 static enum ggml_backend_dev_type ggml_ocl_device_get_type(ggml_backend_dev_t dev) {
@@ -360,11 +364,10 @@ static bool ggml_ocl_device_supports_op(ggml_backend_dev_t dev, const struct ggm
             break;
     }
     // 计算类 op 查注册表 (S8+)
+    // 注意: 模型加载阶段 dev_ctx->backend 可能还是 nullptr，但此时
+    // scheduler 仍需要 supports_op() 来判断权重能否放进 OCL buffer。
     ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) dev->context;
-    if (dev_ctx->backend == nullptr) {
-        return false;
-    }
-    return ocl_op_supports(&dev_ctx->backend->caps, op);
+    return ocl_op_supports(dev_ctx->backend ? &dev_ctx->backend->caps : nullptr, op);
 }
 
 static bool ggml_ocl_device_supports_buft(ggml_backend_dev_t dev, ggml_backend_buffer_type_t buft) {

@@ -68,6 +68,17 @@ struct ggml_ocl_device_context {
     ggml_ocl_backend *       backend         = nullptr;  // set on init_backend
     ggml_backend_buffer_type buffer_type     = {};
 
+    // model load 阶段 (init_backend 之前) 也要能分配权重 buffer / 上传 tensor
+    cl_command_queue         q_load          = nullptr;
+    size_t                   max_alloc       = 0;
+    size_t                   alignment       = 128;
+
+    ~ggml_ocl_device_context() {
+        if (q_load) {
+            clReleaseCommandQueue(q_load);
+        }
+    }
+
     // 进程级共享 kernel 管理器: backend 可能被 sched 多次 init/free,
     // 启动期只编译一次, 避免每次 init 重复编译
     ocl_kernel_mgr kmgr;

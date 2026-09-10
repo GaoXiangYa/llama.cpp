@@ -394,7 +394,6 @@ static bool gemm_q4_1_f32_run(ggml_ocl_backend *  b,
                               const ggml_tensor * src1,
                               ggml_tensor *       dst) {
     cl_kernel k = b->kmgr->get("mul_mat/gemm_q4_1_f32", "gemm_q4_1_f32");
-    printf("%s\n", __func__);
     if (k == nullptr) {
         GGML_LOG_ERROR("cannot find gemm_q4_1_f32 kernel!\n");
         return false;
@@ -466,7 +465,6 @@ static bool gemm_q4_1_f32_run(ggml_ocl_backend *  b,
 
 static bool mul_mat_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
     // gemv
-    printf("%s\n", __func__);
     if (dst->ne[1] == 1) {
         if (src0->type == GGML_TYPE_Q4_1) {
             return gemv_q4_1_f32_run(b, src0, src1, dst);
@@ -478,7 +476,6 @@ static bool mul_mat_run(ggml_ocl_backend * b, const ggml_tensor * src0, const gg
     }
     // gemm
     if (src0->type == GGML_TYPE_Q4_1) {
-        printf("gemm q4_1 kernel!\n");
         return gemm_q4_1_f32_run(b, src0, src1, dst);
     }
     if (src0->type == GGML_TYPE_F16) {
