@@ -1,4 +1,4 @@
-kernel void gemv(
+kernel void gemv_f32_f32(
         global const char* src0, ulong offset0,
         constant char* src1, ulong offset1,
         global char* dst, ulong offsetd,

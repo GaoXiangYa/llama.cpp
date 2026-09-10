@@ -6,7 +6,7 @@
 #define BK_HALF 16
 #define BLOCK_SIZE 20
 
-kernel void gemm_q4_1(
+kernel void gemm_q4_1_f32(
         global uchar* src0, ulong offset0,
         global char* src1, ulong offset1,
         global char* dst, ulong offsetd,

@@ -1,6 +1,6 @@
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-kernel void gemv_q4_1(
+kernel void gemv_q4_1_f32(
         global const char* src0, ulong offset0,
         global const char* src1, ulong offset1,
         global char* dst, ulong offsetd,

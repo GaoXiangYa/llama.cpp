@@ -2,7 +2,7 @@
 #define BN 16
 #define BK 16
 
-kernel void gemm(
+kernel void gemm_f32_f32(
         global char* src0, ulong offset0,
         global char* src1, ulong offset1,
         global char* dst, ulong offsetd,

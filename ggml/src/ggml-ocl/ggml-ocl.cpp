@@ -2,6 +2,7 @@
 
 #include "ggml-ocl.h"
 #include "ggml-ocl-internal.h"
+#include "ggml.h"
 
 #include <memory>
 #include <string>
@@ -214,6 +215,9 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
                 continue;
             default:
                 break;
+        }
+        if (node->op == GGML_OP_GLU) {
+            printf("glu op!\n");
         }
         if ((node->flags & GGML_TENSOR_FLAG_COMPUTE) == 0) {
             continue;

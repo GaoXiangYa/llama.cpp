@@ -68,10 +68,10 @@ set(GGML_OCL_KERNELS
     add/add
     set_rows/set_rows
     get_rows/get_rows
-    mul_mat/gemv
-    mul_mat/gemv_q4_1
-    mul_mat/gemm
-    mul_mat/gemm_q4_1
+    mul_mat/gemv_f32_f32
+    mul_mat/gemv_q4_1_f32
+    mul_mat/gemm_f32_f32
+    mul_mat/gemm_q4_1_f32
     softmax/softmax
     rmsnorm/rmsnorm
     glu/glu
