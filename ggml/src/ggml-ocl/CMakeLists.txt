@@ -17,6 +17,7 @@ ggml_add_backend_library(${TARGET_NAME}
                          ops/softmax.cpp
                          ops/rmsnorm.cpp
                          ops/glu.cpp
+                         ops/mul.cpp
                          ../../include/ggml-ocl.h)
 target_link_libraries(${TARGET_NAME} PRIVATE ${OpenCL_LIBRARIES})
 target_include_directories(${TARGET_NAME} PRIVATE ${OpenCL_INCLUDE_DIRS})
@@ -77,6 +78,7 @@ set(GGML_OCL_KERNELS
     softmax/softmax
     rmsnorm/rmsnorm
     glu/glu
+    mul/mul
 )
 
 foreach (K ${GGML_OCL_KERNELS})

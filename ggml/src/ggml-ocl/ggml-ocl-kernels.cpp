@@ -22,12 +22,19 @@ static const ocl_kernel_def g_kernel_defs[] = {
     { "softmax/softmax",       OCL_KERNEL_GENERIC },
     { "rmsnorm/rmsnorm",       OCL_KERNEL_GENERIC },
     { "glu/glu",               OCL_KERNEL_GENERIC },
+    { "mul/mul",               OCL_KERNEL_GENERIC },
 };
 
 static const std::string & ocl_kernel_source(const char * src_id) {
     if (strcmp(src_id, "add/add") == 0) {
         static const std::string src{
 #include "add/add.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "mul/mul") == 0) {
+        static const std::string src{
+#include "mul/mul.cl.h"
         };
         return src;
     }
