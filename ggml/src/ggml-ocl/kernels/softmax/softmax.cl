@@ -85,7 +85,8 @@ kernel void softmax(global char * src0,
     global float * dst_ptr  = (global float *) (dst + offsetd + i1 * nb1 + i2 * nb2 + i3 * nb3);
 
     // ALiBi
-    float slope = 0.0f;
+    // 注意: 没有 ALiBi 时 slope 必须是 1.0，否则 0 * (-INF) 会产生 NaN
+    float slope = 1.0f;
     if (max_bias > 0.0f) {
         int h = i2;
 
@@ -100,7 +101,10 @@ kernel void softmax(global char * src0,
     local float s_max;
     local float s_sum;
 
-    float max_num = src2_ptr ? src2_ptr[i2] : -INFINITY;
+    float max_num = -INFINITY;
+    if (has_sinks) {
+        max_num = src2_ptr[i2];
+    }
     for (int i = i0; i < ne0; i += lsz) {
         max_num = MAX(max_num, src0_ptr[i] * scale + (has_mask ? slope * src1_ptr[i] : 0.0f));
     }
