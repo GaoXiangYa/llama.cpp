@@ -58,7 +58,7 @@ inline std::vector<float> ocl_op_eval(ggml_backend_t backend, ocl_op_build_fn bu
     ggml_cgraph * graph = ggml_new_graph(ctx);
     ggml_tensor * out = build(ctx, graph, userdata);
     GGML_ASSERT(out != nullptr);
-    GGML_ASSERT(out->type == GGML_TYPE_F32 && "S9: only f32 outputs supported");
+    GGML_ASSERT((out->type == GGML_TYPE_F32 || out->type == GGML_TYPE_F16) && "only f32/f16 outputs supported");
 
     ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, backend);
     GGML_ASSERT(buf != nullptr);
@@ -88,7 +88,15 @@ inline std::vector<float> ocl_op_eval(ggml_backend_t backend, ocl_op_build_fn bu
     ggml_backend_synchronize(backend);
 
     std::vector<float> res(ggml_nelements(out));
-    ggml_backend_tensor_get(out, res.data(), 0, ggml_nbytes(out));
+    if (out->type == GGML_TYPE_F32) {
+        ggml_backend_tensor_get(out, res.data(), 0, ggml_nbytes(out));
+    } else {
+        std::vector<ggml_fp16_t> tmp(ggml_nelements(out));
+        ggml_backend_tensor_get(out, tmp.data(), 0, ggml_nbytes(out));
+        for (size_t i = 0; i < tmp.size(); i++) {
+            res[i] = ggml_fp16_to_fp32(tmp[i]);
+        }
+    }
 
     ggml_backend_buffer_free(buf);
     ggml_free(ctx);

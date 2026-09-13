@@ -4,11 +4,40 @@
 
 namespace ops {
 static bool set_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
+    (void) caps;
+    if (op->op != GGML_OP_SET_ROWS) {
+        return false;
+    }
+    const ggml_type rows_type = op->src[0]->type;
+    const ggml_type dst_type  = op->type;
+    if (rows_type != GGML_TYPE_F32 && rows_type != GGML_TYPE_F16) {
+        return false;
+    }
+    if (dst_type != GGML_TYPE_F32 && dst_type != GGML_TYPE_F16) {
+        return false;
+    }
+    if (op->src[1]->type != GGML_TYPE_I64 && op->src[1]->type != GGML_TYPE_I32) {
+        return false;
+    }
     return true;
 }
 
 static bool set_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
-    const char* kernel_name = dst->type == GGML_TYPE_F32 ? "set_rows_f32_i64_f32" : "set_rows_f16_i64_f16";
+    const char * kernel_name = nullptr;
+    if (src0->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32) {
+        kernel_name = "set_rows_f32_i64_f32";
+    } else if (src0->type == GGML_TYPE_F16 && dst->type == GGML_TYPE_F16) {
+        kernel_name = "set_rows_f16_i64_f16";
+    } else if (src0->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F16) {
+        kernel_name = "set_rows_f32_i64_f16";
+    } else if (src0->type == GGML_TYPE_F16 && dst->type == GGML_TYPE_F32) {
+        kernel_name = "set_rows_f16_i64_f32";
+    } else {
+        GGML_LOG_ERROR("set_rows: unsupported type combination src0=%s dst=%s\n",
+                       ggml_type_name(src0->type), ggml_type_name(dst->type));
+        return false;
+    }
+
     cl_kernel k = b->kmgr->get("set_rows/set_rows", kernel_name);
     if (k == nullptr) {
         return false;

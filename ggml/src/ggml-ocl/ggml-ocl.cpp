@@ -207,6 +207,84 @@ static void ggml_ocl_backend_synchronize(ggml_backend_t backend) {
     OCL_CHECK(clFinish(b->q_compute));
 }
 
+// ---------------------------------------------------------------------------
+// 调试: 逐节点检测 NaN / Inf，并可选打印每个节点的数值范围
+// 用法:
+//   GGML_OCL_CHECK_NAN=1  -> 发现第一个 NaN 时 abort
+//   GGML_OCL_DUMP_NODE=1  -> 打印每个 OCL 节点的 min/max/nan/inf
+// ---------------------------------------------------------------------------
+
+static bool ggml_ocl_debug_env_enabled(const char * name) {
+    const char * env = getenv(name);
+    return env != nullptr && atoi(env) != 0;
+}
+
+static void ggml_ocl_check_node_nan(ggml_backend_t backend, ggml_tensor * node) {
+    const bool check_nan = ggml_ocl_debug_env_enabled("GGML_OCL_CHECK_NAN");
+    const bool dump_node = ggml_ocl_debug_env_enabled("GGML_OCL_DUMP_NODE");
+
+    if (!check_nan && !dump_node) {
+        return;
+    }
+    if (node->type != GGML_TYPE_F32 && node->type != GGML_TYPE_F16) {
+        return;
+    }
+
+    // 先把计算队列同步到当前节点完成
+    ggml_backend_synchronize(backend);
+
+    std::vector<uint8_t> buf(ggml_nbytes(node));
+    ggml_backend_tensor_get(node, buf.data(), 0, buf.size());
+
+    size_t count_nan = 0;
+    size_t count_inf = 0;
+    double v_min =  INFINITY;
+    double v_max = -INFINITY;
+
+    auto scan_one = [&](float v) {
+        if (isnan(v)) {
+            count_nan++;
+        } else if (isinf(v)) {
+            count_inf++;
+        } else {
+            v_min = v < v_min ? v : v_min;
+            v_max = v > v_max ? v : v_max;
+        }
+    };
+
+    if (node->type == GGML_TYPE_F32) {
+        const float * data = (const float *) buf.data();
+        const size_t n = buf.size() / sizeof(float);
+        for (size_t i = 0; i < n; ++i) {
+            scan_one(data[i]);
+        }
+    } else {
+        const ggml_fp16_t * data = (const ggml_fp16_t *) buf.data();
+        const size_t n = buf.size() / sizeof(ggml_fp16_t);
+        for (size_t i = 0; i < n; ++i) {
+            scan_one(GGML_FP16_TO_FP32(data[i]));
+        }
+    }
+
+    if (dump_node) {
+        GGML_LOG_INFO("ggml-ocl: node op=%-16s name=%-32s type=%-6s ne=[%lld %lld %lld %lld] min=%g max=%g nan=%zu inf=%zu\n",
+                      ggml_op_name(node->op), node->name ? node->name : "?",
+                      ggml_type_name(node->type),
+                      (long long) node->ne[0], (long long) node->ne[1],
+                      (long long) node->ne[2], (long long) node->ne[3],
+                      v_min, v_max, count_nan, count_inf);
+    }
+
+    if (check_nan && count_nan > 0) {
+        GGML_LOG_ERROR("ggml-ocl: first NaN detected after op=%s name=%s type=%s ne=[%lld %lld %lld %lld]\n",
+                       ggml_op_name(node->op), node->name ? node->name : "?",
+                       ggml_type_name(node->type),
+                       (long long) node->ne[0], (long long) node->ne[1],
+                       (long long) node->ne[2], (long long) node->ne[3]);
+        GGML_ABORT("ggml-ocl: NaN detected after %s (%s)\n", ggml_op_name(node->op), node->name ? node->name : "?");
+    }
+}
+
 // M0: 空骨架 - 过滤视图类节点, 其余跳过 (supports_op 全 false, 不应有计算节点到达)
 static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_cgraph * cgraph) {
     ggml_ocl_backend * b = (ggml_ocl_backend *) backend->context;
@@ -236,6 +314,9 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
 
         bool ok = ocl_op_dispatch(b, node);
         GGML_ASSERT(ok && "unsupported op in graph (supports_op should have filtered it)");
+
+        // 调试模式: 每个节点后同步并检查 NaN，定位最先出错的算子
+        ggml_ocl_check_node_nan(backend, node);
     }
 
     ocl_exec_flush(b);
