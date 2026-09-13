@@ -397,10 +397,48 @@ static ggml_backend_t ggml_ocl_device_init(ggml_backend_dev_t dev, const char * 
 #ifdef GGML_OCL_PROFILING
     queue_props |= CL_QUEUE_PROFILING_ENABLE;
 #endif
-    OCL_CHECK((b->q_compute = clCreateCommandQueueWithProperties(b->context, dev_ctx->device, &queue_props, nullptr), 0));
-    OCL_CHECK((b->q_copy    = clCreateCommandQueueWithProperties(b->context, dev_ctx->device, &queue_props, nullptr), 0));
+
+    auto create_queue = [&](cl_command_queue * q, cl_command_queue_properties props) -> cl_int {
+        cl_int err = CL_SUCCESS;
+        *q = clCreateCommandQueueWithProperties(b->context, dev_ctx->device, &props, &err);
+        if (err == CL_SUCCESS) {
+            return err;
+        }
+
+        // OpenCL 1.2 驱动可能只完整支持旧的 clCreateCommandQueue。
+        // 新 API 失败时回退到旧 API，这样 CL_QUEUE_PROFILING_ENABLE 仍可用。
+        cl_int err_old = CL_SUCCESS;
+        cl_command_queue q_old = clCreateCommandQueue(b->context, dev_ctx->device, props, &err_old);
+        if (err_old == CL_SUCCESS) {
+            *q = q_old;
+            return err_old;
+        }
+
+        return err;
+    };
+
+    cl_int qerr = create_queue(&b->q_compute, queue_props);
+#ifdef GGML_OCL_PROFILING
+    if (qerr != CL_SUCCESS && (queue_props & CL_QUEUE_PROFILING_ENABLE)) {
+        GGML_LOG_WARN("ggml-ocl: profiling queue creation failed (%d), fallback to normal queue\n", qerr);
+        queue_props &= ~CL_QUEUE_PROFILING_ENABLE;
+        qerr = create_queue(&b->q_compute, queue_props);
+    } else {
+        b->profiling_enabled = true;
+    }
+#endif
+    OCL_CHECK(qerr);
+    GGML_ASSERT(b->q_compute != nullptr);
+
+    qerr = create_queue(&b->q_copy, queue_props);
+    OCL_CHECK(qerr);
+    GGML_ASSERT(b->q_copy != nullptr);
 
     b->scratch_pool.init(b->context);
+
+#ifdef GGML_OCL_PROFILING
+    GGML_LOG_INFO("ggml-ocl: profiling %s\n", b->profiling_enabled ? "enabled" : "disabled (queue fallback)");
+#endif
 
     // 启动期全量编译 kernel (进程级共享, 幂等); 推理期零编译
     b->kmgr = &dev_ctx->kmgr;

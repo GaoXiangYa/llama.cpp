@@ -381,6 +381,8 @@ struct ggml_ocl_backend {
     ocl_pool         scratch_pool;
     ocl_subpool      sub_pool;
 
+    bool profiling_enabled = false;        // 实际创建 profiling queue 是否成功
+
     // 显存记账 (DESIGN.md 16.5): 已分配 buffer 总字节, 供 get_memory
     size_t mem_allocated = 0;
 

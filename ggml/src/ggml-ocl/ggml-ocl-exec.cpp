@@ -16,23 +16,25 @@ void ocl_kernel_call::enqueue(ggml_ocl_backend * backend, cl_event * evt_out) {
     }
 
 #ifdef GGML_OCL_PROFILING
-    cl_event evt = nullptr;
-    OCL_CHECK(clEnqueueNDRangeKernel(backend->q_compute, kernel, ndims, nullptr,
-                                     global, local, 0, nullptr, &evt));
-    // profiling 模式: 同步结算, 统计 (op 名, kernel 名, 耗时)
-    OCL_CHECK(clWaitForEvents(1, &evt));
-    cl_ulong start = 0, end = 0;
-    clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_START, sizeof(start), &start, nullptr);
-    clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_END,   sizeof(end),   &end,   nullptr);
-    clReleaseEvent(evt);
-    backend->stats.record(op_name ? op_name : "?", "?", (cl_ulong)(end - start));
-    if (evt_out) {
-        *evt_out = nullptr;
+    if (backend->profiling_enabled) {
+        cl_event evt = nullptr;
+        OCL_CHECK(clEnqueueNDRangeKernel(backend->q_compute, kernel, ndims, nullptr,
+                                         global, local, 0, nullptr, &evt));
+        // profiling 模式: 同步结算, 统计 (op 名, kernel 名, 耗时)
+        OCL_CHECK(clWaitForEvents(1, &evt));
+        cl_ulong start = 0, end = 0;
+        OCL_CHECK(clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_START, sizeof(start), &start, nullptr));
+        OCL_CHECK(clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_END,   sizeof(end),   &end,   nullptr));
+        clReleaseEvent(evt);
+        backend->stats.record(op_name ? op_name : "?", "?", (cl_ulong)(end - start));
+        if (evt_out) {
+            *evt_out = nullptr;
+        }
+        return;
     }
-#else
+#endif
     OCL_CHECK(clEnqueueNDRangeKernel(backend->q_compute, kernel, ndims, nullptr,
                                      global, local, 0, nullptr, evt_out));
-#endif
 }
 
 // ---------------------------------------------------------------------------
