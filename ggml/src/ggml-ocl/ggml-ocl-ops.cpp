@@ -1,3 +1,6 @@
+#include <cstdlib>
+#include <string>
+
 #include "ggml-ocl-internal.h"
 
 extern const ocl_op ocl_ops_op_add[];
@@ -43,8 +46,48 @@ bool ocl_op_dispatch(ggml_ocl_backend * b, ggml_tensor * node) {
     return false;
 }
 
+// 调试: GGML_OCL_DISABLE_OPS=MUL_MAT,ROPE,GLU
+// 让指定 op 强制走 CPU，用于定位是哪个算子算错。
+static bool ggml_ocl_debug_op_disabled(enum ggml_op op) {
+    const char * env = getenv("GGML_OCL_DISABLE_OPS");
+    if (env == nullptr || env[0] == 0) {
+        return false;
+    }
+
+    const char * op_name = ggml_op_name(op);
+    const std::string list(env);
+
+    size_t pos = 0;
+    while (pos < list.size()) {
+        size_t end = list.find(',', pos);
+        if (end == std::string::npos) {
+            end = list.size();
+        }
+        std::string item = list.substr(pos, end - pos);
+        // 去掉首尾空格
+        size_t b = item.find_first_not_of(" \t");
+        size_t e = item.find_last_not_of(" \t");
+        if (b != std::string::npos) {
+            item = item.substr(b, e - b + 1);
+        } else {
+            item.clear();
+        }
+        if (!item.empty() && item == op_name) {
+            return true;
+        }
+        pos = end + 1;
+    }
+    return false;
+}
+
 bool ocl_op_supports(const ggml_ocl_caps * caps, const ggml_tensor * node) {
     if (node == nullptr) {
+        return false;
+    }
+
+    if (ggml_ocl_debug_op_disabled(node->op)) {
+        GGML_LOG_INFO("ggml-ocl: op %s disabled by GGML_OCL_DISABLE_OPS, fallback to CPU\n",
+                      ggml_op_name(node->op));
         return false;
     }
     for (const ocl_op * group : g_op_groups) {

@@ -6,10 +6,45 @@
 #include <CL/cl_platform.h>
 
 namespace ops {
+// 调试: 进一步细分禁用 MUL_MAT，避免一刀切全部回退 CPU。
+// 用法示例:
+//   GGML_OCL_DISABLE_MUL_MAT=q4_1
+//   GGML_OCL_DISABLE_MUL_MAT=f16
+//   GGML_OCL_DISABLE_MUL_MAT=f32
+//   GGML_OCL_DISABLE_MUL_MAT=gemv
+//   GGML_OCL_DISABLE_MUL_MAT=gemm
+//   GGML_OCL_DISABLE_MUL_MAT=q4_1,gemv
+static bool mul_mat_debug_disabled(const ggml_tensor * op) {
+    const char * env = getenv("GGML_OCL_DISABLE_MUL_MAT");
+    if (env == nullptr || env[0] == 0) {
+        return false;
+    }
+
+    const char * type_name = ggml_type_name(op->src[0]->type);
+    if (strstr(env, type_name) != nullptr) {
+        return true;
+    }
+
+    if (op->ne[1] == 1 && strstr(env, "gemv") != nullptr) {
+        return true;
+    }
+    if (op->ne[1] != 1 && strstr(env, "gemm") != nullptr) {
+        return true;
+    }
+
+    return false;
+}
+
 static bool mul_mat_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     (void) caps;
     if (op->op != GGML_OP_MUL_MAT) {
         GGML_LOG_ERROR("op type is not mul mat!\n");
+        return false;
+    }
+
+    if (mul_mat_debug_disabled(op)) {
+        GGML_LOG_INFO("ggml-ocl: MUL_MAT src0=%s ne1=%lld disabled by GGML_OCL_DISABLE_MUL_MAT, fallback to CPU\n",
+                      ggml_type_name(op->src[0]->type), (long long) op->ne[1]);
         return false;
     }
     if ((op->src[0]->type != GGML_TYPE_F32 && op->src[0]->type != GGML_TYPE_Q4_1 &&
