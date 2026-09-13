@@ -20,16 +20,32 @@ static bool mul_mat_debug_disabled(const ggml_tensor * op) {
         return false;
     }
 
-    const char * type_name = ggml_type_name(op->src[0]->type);
-    if (strstr(env, type_name) != nullptr) {
-        return true;
-    }
+    const bool has_q4_1 = strstr(env, "q4_1") != nullptr;
+    const bool has_f16  = strstr(env, "f16")  != nullptr;
+    const bool has_f32  = strstr(env, "f32")  != nullptr;
+    const bool has_gemv = strstr(env, "gemv") != nullptr;
+    const bool has_gemm = strstr(env, "gemm") != nullptr;
 
-    if (op->ne[1] == 1 && strstr(env, "gemv") != nullptr) {
-        return true;
+    const bool has_any_type   = has_q4_1 || has_f16 || has_f32;
+    const bool has_any_kernel = has_gemv || has_gemm;
+
+    const bool type_match =
+        (op->src[0]->type == GGML_TYPE_Q4_1 && has_q4_1) ||
+        (op->src[0]->type == GGML_TYPE_F16  && has_f16)  ||
+        (op->src[0]->type == GGML_TYPE_F32  && has_f32);
+
+    const bool kernel_match =
+        (op->ne[1] == 1 && has_gemv) ||
+        (op->ne[1] != 1 && has_gemm);
+
+    if (has_any_type && has_any_kernel) {
+        return type_match && kernel_match;
     }
-    if (op->ne[1] != 1 && strstr(env, "gemm") != nullptr) {
-        return true;
+    if (has_any_type) {
+        return type_match;
+    }
+    if (has_any_kernel) {
+        return kernel_match;
     }
 
     return false;

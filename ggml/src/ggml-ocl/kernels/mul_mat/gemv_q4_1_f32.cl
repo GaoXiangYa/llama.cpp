@@ -23,8 +23,8 @@ kernel void gemv_q4_1_f32(
     const int i11 = i1;
     const int i12 = i2;
 
-    const int i01 = i1 / ne02;
-    const int i02 = i2 / ne03;
+    const int i01 = i1 / (ne12 / ne02);
+    const int i02 = i2 / (ne13 / ne03);
 
     const int warp_size = get_sub_group_size();
     const int warp_id   = get_sub_group_id();

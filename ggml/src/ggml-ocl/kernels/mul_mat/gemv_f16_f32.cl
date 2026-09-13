@@ -1,6 +1,8 @@
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+
 kernel void gemv_f16_f32(
         global const char* src0, ulong offset0,
-        constant char* src1, ulong offset1,
+        global const char* src1, ulong offset1,
         global char* dst, ulong offsetd,
         int ne00, int ne01, int ne02, int ne03,
         int nb00, int nb01, int nb02, int nb03,
@@ -20,8 +22,9 @@ kernel void gemv_f16_f32(
     const int i11 = i1;
     const int i12 = i2;
 
-    const int i01 = i1 / ne02;
-    const int i02 = i2 / ne03;
+    // GQA/MQA broadcast: src1 的 head 数 ne12 可能是 src0 的整数倍
+    const int i01 = i1 / (ne12 / ne02);
+    const int i02 = i2 / (ne13 / ne03);
 
     const int warp_size = get_sub_group_size();
     const int warp_id = get_sub_group_id();
@@ -32,12 +35,12 @@ kernel void gemv_f16_f32(
     }
 
     global const half* src0_ptr = (global const half*)(src0 + g_row * nb01 + i01 * nb02 + i02 * nb03);
-    constant float* src1_ptr = (constant float*)(src1 + i11 * nb12 + i12 * nb13);
+    global const float* src1_ptr = (global const float*)(src1 + i11 * nb12 + i12 * nb13);
     global float* dst_ptr = (global float*)(dst + i1 * nb1 + i2 * nb2);
 
     float sum = 0.0f;
     for (int i = lane_id; i < ne00; i += warp_size) {
-        sum += (float)src0_ptr[i] * src1_ptr[i];
+        sum += convert_float(src0_ptr[i]) * src1_ptr[i];
     }
     sum = sub_group_reduce_add(sum);
 

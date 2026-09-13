@@ -1,3 +1,5 @@
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+
 #define BM 16
 #define BN 16
 #define BK 16
@@ -44,8 +46,9 @@ kernel void gemm_f16_f32(global char * src0,
     const int i11 = i1;
     const int i12 = i2;
 
-    const int i01 = i1 % ne02;
-    const int i02 = i2 % ne03;
+    // GQA/MQA broadcast: src1 的 head/batch 数可能是 src0 的整数倍
+    const int i01 = i1 / (ne12 / ne02);
+    const int i02 = i2 / (ne13 / ne03);
 
     const int lid      = get_local_id(0);
     const int warp_id  = lid >> 6;  // 0..3
@@ -91,7 +94,7 @@ kernel void gemm_f16_f32(global char * src0,
         barrier(CLK_LOCAL_MEM_FENCE);
 
         for (int kk = 0; kk < BK; ++kk) {
-            sum += (float) lA[local_col * BK + kk] * lB[local_row * BK + kk];
+            sum += convert_float(lA[local_col * BK + kk]) * lB[local_row * BK + kk];
         }
         barrier(CLK_LOCAL_MEM_FENCE);
     }
