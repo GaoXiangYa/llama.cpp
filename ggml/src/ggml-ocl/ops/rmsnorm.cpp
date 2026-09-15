@@ -15,7 +15,8 @@ static bool rmsnorm_supports(const ggml_ocl_caps * caps, const ggml_tensor * op)
 
 static bool rmsnorm_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor* s1, ggml_tensor * dst) {
     (void) s1;
-    cl_kernel k = b->kmgr->get("rmsnorm/rmsnorm", "rmsnorm");
+    const bool f16 = ocl_f16_packed(s0);
+    cl_kernel k = ocl_pick_kernel(b, "rmsnorm/rmsnorm", "rmsnorm", "rmsnorm_f16", f16);
     if (k == nullptr) {
         return false;
     }
@@ -43,14 +44,15 @@ static bool rmsnorm_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml
     call.local[2]  = 1;
 
     call.arg_cl_mem(e0->data_device);
-    call.arg_u64(e0->offset + s0->view_offs);
+    call.arg_u64(ocl_dev_offset(s0, e0));
     call.arg_cl_mem(ed->data_device);
-    call.arg_u64(ed->offset + dst->view_offs);
+    call.arg_u64(ocl_dev_offset(dst, ed));
 
+    // kernel 对 src0 / dst 用同一组步长, 依赖两者布局一致 (原有的隐含假设)
     call.arg_i32((cl_int) dst->ne[0]);
-    call.arg_i32((cl_int) dst->nb[1]);
-    call.arg_i32((cl_int) dst->nb[2]);
-    call.arg_i32((cl_int) dst->nb[3]);
+    call.arg_i32(ocl_nb(dst, dst->nb[1]));
+    call.arg_i32(ocl_nb(dst, dst->nb[2]));
+    call.arg_i32(ocl_nb(dst, dst->nb[3]));
 
     call.arg_f32(eps);
     call.enqueue(b);

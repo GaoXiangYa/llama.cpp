@@ -14,7 +14,8 @@ static bool mul_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
 }
 
 static bool mul_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
-    cl_kernel k = b->kmgr->get("mul/mul", "mul");
+    const bool f16 = ocl_f16_packed(s0);
+    cl_kernel k = ocl_pick_kernel(b, "mul/mul", "mul", "mul_f16", f16);
     if (k == nullptr) {
         return false;
     }
@@ -41,35 +42,35 @@ static bool mul_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_ten
     call.local[2]  = 1;
 
     call.arg_cl_mem(e0->data_device);
-    call.arg_u64(e0->offset + s0->view_offs);
+    call.arg_u64(ocl_dev_offset(s0, e0));
     call.arg_cl_mem(e1->data_device);
-    call.arg_u64(e1->offset + s1->view_offs);
+    call.arg_u64(ocl_dev_offset(s1, e1));
     call.arg_cl_mem(ed->data_device);
-    call.arg_u64(ed->offset + dst->view_offs);
+    call.arg_u64(ocl_dev_offset(dst, ed));
     call.arg_i32((cl_int) s0->ne[0]);
     call.arg_i32(ne01);
     call.arg_i32(ne02);
     call.arg_i32(ne03);
-    call.arg_u64((cl_ulong) s0->nb[0]);
-    call.arg_u64((cl_ulong) s0->nb[1]);
-    call.arg_u64((cl_ulong) s0->nb[2]);
-    call.arg_u64((cl_ulong) s0->nb[3]);
+    call.arg_u64(ocl_nb64(s0, s0->nb[0]));
+    call.arg_u64(ocl_nb64(s0, s0->nb[1]));
+    call.arg_u64(ocl_nb64(s0, s0->nb[2]));
+    call.arg_u64(ocl_nb64(s0, s0->nb[3]));
     call.arg_i32((cl_int) s1->ne[0]);
     call.arg_i32((cl_int) s1->ne[1]);
     call.arg_i32((cl_int) s1->ne[2]);
     call.arg_i32((cl_int) s1->ne[3]);
-    call.arg_u64((cl_ulong) s1->nb[0]);
-    call.arg_u64((cl_ulong) s1->nb[1]);
-    call.arg_u64((cl_ulong) s1->nb[2]);
-    call.arg_u64((cl_ulong) s1->nb[3]);
+    call.arg_u64(ocl_nb64(s1, s1->nb[0]));
+    call.arg_u64(ocl_nb64(s1, s1->nb[1]));
+    call.arg_u64(ocl_nb64(s1, s1->nb[2]));
+    call.arg_u64(ocl_nb64(s1, s1->nb[3]));
     call.arg_i32((cl_int) dst->ne[0]);
     call.arg_i32((cl_int) dst->ne[1]);
     call.arg_i32((cl_int) dst->ne[2]);
     call.arg_i32((cl_int) dst->ne[3]);
-    call.arg_u64((cl_ulong) dst->nb[0]);
-    call.arg_u64((cl_ulong) dst->nb[1]);
-    call.arg_u64((cl_ulong) dst->nb[2]);
-    call.arg_u64((cl_ulong) dst->nb[3]);
+    call.arg_u64(ocl_nb64(dst, dst->nb[0]));
+    call.arg_u64(ocl_nb64(dst, dst->nb[1]));
+    call.arg_u64(ocl_nb64(dst, dst->nb[2]));
+    call.arg_u64(ocl_nb64(dst, dst->nb[3]));
 
     call.enqueue(b);
     return true;

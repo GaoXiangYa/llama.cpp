@@ -6,7 +6,8 @@
 #define BK_HALF 16
 #define BLOCK_SIZE 20
 
-kernel void gemm_q4_1_f32(
+// fp16 存储: 权重仍是 Q4_1, 激活与输出在设备上是 half
+kernel void gemm_q4_1_f16(
         global uchar* src0, ulong offset0,
         global char* src1, ulong offset1,
         global char* dst, ulong offsetd,
@@ -41,7 +42,7 @@ kernel void gemm_q4_1_f32(
     const int lane_col = lane_id & 31;
 
     local uchar lA[BN * BK_HALF];
-    local float lB[BM * BK];
+    local half  lB[BM * BK];
 
     const int group_row = i0 / num_groups;
     const int group_col = i0 % num_groups;
@@ -79,9 +80,9 @@ kernel void gemm_q4_1_f32(
         const int global_b_col = k + local_col;
         if (local_col < BK) {
             if (global_b_row < ne11 && global_b_col < ne10) {
-                lB[local_row * BK + local_col] = *(global float*)(src1 + global_b_col * nb10 + global_b_row * nb11 + i11 * nb12 + i12 * nb13);
+                lB[local_row * BK + local_col] = *(global half*)(src1 + global_b_col * nb10 + global_b_row * nb11 + i11 * nb12 + i12 * nb13);
             } else {
-                lB[local_row * BK + local_col] = 0.0f;
+                lB[local_row * BK + local_col] = (half) 0.0f;
             }
         }
         barrier(CLK_LOCAL_MEM_FENCE);
@@ -91,7 +92,7 @@ kernel void gemm_q4_1_f32(
         for (int ik = 0; ik < BK; ++ ik) {
             uchar packed = lA[local_col * BK_HALF + (ik & (BK_HALF - 1))];
             float q = (float)(ik < BK_HALF ? (packed & 0x0F) : (packed >> 4));
-            float b = lB[local_row * BK + ik];
+            float b = convert_float(lB[local_row * BK + ik]);
             sum0 += q * b;
             sum1 += b;
         }
@@ -100,7 +101,6 @@ kernel void gemm_q4_1_f32(
     }
     
     if (global_col < ne0 && global_row < ne1) {
-        *(global float*)(dst + global_col * nb0 + global_row * nb1 + i1 * nb2 + i2 * nb3) = acc;
+        *(global half*)(dst + global_col * nb0 + global_row * nb1 + i1 * nb2 + i2 * nb3) = convert_half(acc);
     }
 }
-

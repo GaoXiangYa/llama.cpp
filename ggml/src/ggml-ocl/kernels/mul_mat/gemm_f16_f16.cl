@@ -4,7 +4,8 @@
 #define BN 16
 #define BK 16
 
-kernel void gemm_f16_f32(global char * src0,
+// fp16 存储: src0 本来就是 F16, src1/dst 是 F32 -> half
+kernel void gemm_f16_f16(global char * src0,
                          ulong         offset0,
                          global char * src1,
                          ulong         offset1,
@@ -46,7 +47,6 @@ kernel void gemm_f16_f32(global char * src0,
     const int i11 = i1;
     const int i12 = i2;
 
-    // GQA/MQA broadcast: src1 的 head/batch 数可能是 src0 的整数倍
     const int i01 = i1 / (ne12 / ne02);
     const int i02 = i2 / (ne13 / ne03);
 
@@ -58,8 +58,8 @@ kernel void gemm_f16_f32(global char * src0,
     const int lane_row = lane_id >> 3;
     const int lane_col = lane_id & 7;
 
-    local half  lA[BK * BN];
-    local float lB[BK * BM];
+    local half lA[BK * BN];
+    local half lB[BK * BM];
 
     const int group_row  = i0 / num_groups;
     const int group_col  = i0 % num_groups;
@@ -79,7 +79,7 @@ kernel void gemm_f16_f32(global char * src0,
             lA[local_col * BK + local_row] =
                 *(global half *) (src0 + global_a_col * nb00 + global_a_row * nb01 + i01 * nb02 + i02 * nb03);
         } else {
-            lA[local_col * BK + local_row] = 0.0f;
+            lA[local_col * BK + local_row] = (half) 0.0f;
         }
 
         // load src1 to local memory
@@ -87,20 +87,19 @@ kernel void gemm_f16_f32(global char * src0,
         const int global_b_col = k + local_col;
         if (global_b_row < ne11 && global_b_col < ne10) {
             lB[local_row * BN + local_col] =
-                *(global float *) (src1 + global_b_col * nb10 + global_b_row * nb11 + i11 * nb12 + i12 * nb13);
+                *(global half *) (src1 + global_b_col * nb10 + global_b_row * nb11 + i11 * nb12 + i12 * nb13);
         } else {
-            lB[local_row * BN + local_col] = 0.0f;
+            lB[local_row * BN + local_col] = (half) 0.0f;
         }
         barrier(CLK_LOCAL_MEM_FENCE);
 
         for (int kk = 0; kk < BK; ++kk) {
-            sum += convert_float(lA[local_col * BK + kk]) * lB[local_row * BK + kk];
+            sum += convert_float(lA[local_col * BK + kk]) * convert_float(lB[local_row * BK + kk]);
         }
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
     if (global_col < ne0 && global_row < ne1) {
-        *(global float *) (dst + global_col * nb0 + global_row * nb1 + i1 * nb2 + i2 * nb3) = sum;
+        *(global half *) (dst + global_col * nb0 + global_row * nb1 + i1 * nb2 + i2 * nb3) = convert_half(sum);
     }
 }
-

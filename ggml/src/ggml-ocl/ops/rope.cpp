@@ -1,10 +1,20 @@
 #include "ggml-ocl-internal.h"
 #include <CL/cl_platform.h>
 
+#include <cstdio>
+
 namespace ops {
 static bool rope_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     (void) caps;
-    if (op->op != GGML_OP_ADD) {
+    if (op->op != GGML_OP_ROPE) {
+        return false;
+    }
+    if (op->src[0]->type != GGML_TYPE_F32 && op->src[0]->type != GGML_TYPE_F16) {
+        return false;
+    }
+    // fp16 存储下 F32 的 freq_factors 在设备上也是 half, 而 _f16 kernel 按 float 读它。
+    // 带 freq_factors 的用例回退 CPU, 不走错路。
+    if (ocl_f16_packed(op->src[0]) && op->src[2] != nullptr) {
         return false;
     }
     return true;
@@ -15,24 +25,24 @@ static bool rope_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_te
     ggml_ocl_tensor_extra * extra1 = (ggml_ocl_tensor_extra *)s1->extra;
     ggml_ocl_tensor_extra * extrad = (ggml_ocl_tensor_extra *)dst->extra;
 
-    cl_ulong offset0 = extra0->offset + s0->view_offs;
-    cl_ulong offset1 = extra1->offset + s1->view_offs;
-    cl_ulong offsetd = extrad->offset + dst->view_offs;
+    cl_ulong offset0 = ocl_dev_offset(s0, extra0);
+    cl_ulong offset1 = ocl_dev_offset(s1, extra1);
+    cl_ulong offsetd = ocl_dev_offset(dst, extrad);
 
     ggml_tensor * src2 = dst->src[2];
     ggml_ocl_tensor_extra * extra2 = src2 ? (ggml_ocl_tensor_extra *)src2->extra : nullptr;
 
-    cl_ulong offset2 = extra2 ? extra2->offset + src2->view_offs : offset0;
+    cl_ulong offset2 = extra2 ? ocl_dev_offset(src2, extra2) : offset0;
 
     const int  ne00 = s0 ? s0->ne[0] : 0;
     const int  ne01 = s0 ? s0->ne[1] : 0;
     const int  ne02 = s0 ? s0->ne[2] : 0;
     const int  ne03 = s0 ? s0->ne[3] : 0;
 
-    const cl_ulong  nb00 = s0 ? s0->nb[0] : 0;
-    const cl_ulong  nb01 = s0 ? s0->nb[1] : 0;
-    const cl_ulong  nb02 = s0 ? s0->nb[2] : 0;
-    const cl_ulong  nb03 = s0 ? s0->nb[3] : 0;
+    const cl_ulong  nb00 = s0 ? ocl_nb64(s0, s0->nb[0]) : 0;
+    const cl_ulong  nb01 = s0 ? ocl_nb64(s0, s0->nb[1]) : 0;
+    const cl_ulong  nb02 = s0 ? ocl_nb64(s0, s0->nb[2]) : 0;
+    const cl_ulong  nb03 = s0 ? ocl_nb64(s0, s0->nb[3]) : 0;
 
     const int ne10 = s1 ? s1->ne[0] : 0;
     const int ne11 = s1 ? s1->ne[1] : 0; 
@@ -44,10 +54,10 @@ static bool rope_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_te
     const int  ne2 = dst ? dst->ne[2] : 0;
     const int  ne3 = dst ? dst->ne[3] : 0;
 
-    const cl_ulong  nb0 = dst ? dst->nb[0] : 0;
-    const cl_ulong  nb1 = dst ? dst->nb[1] : 0;
-    const cl_ulong  nb2 = dst ? dst->nb[2] : 0;
-    const cl_ulong  nb3 = dst ? dst->nb[3] : 0;
+    const cl_ulong  nb0 = dst ? ocl_nb64(dst, dst->nb[0]) : 0;
+    const cl_ulong  nb1 = dst ? ocl_nb64(dst, dst->nb[1]) : 0;
+    const cl_ulong  nb2 = dst ? ocl_nb64(dst, dst->nb[2]) : 0;
+    const cl_ulong  nb3 = dst ? ocl_nb64(dst, dst->nb[3]) : 0;
 
     GGML_ASSERT(ne10 % ne02 == 0);
     GGML_ASSERT(ne10 >= ne02);
@@ -88,56 +98,22 @@ static bool rope_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_te
         GGML_ASSERT(n_dims == ne00/2);
     }
 
-    cl_kernel kernel;
-    const char* kernel_name = nullptr;
+    // kernel 后缀由"设备上的有效元素类型"决定: F32 未打包 -> _f32; F16 真实张量
+    // 或 fp16 存储下的 F32 -> _f16 (两者在显存里都是 half, 共用同一批 kernel)
+    const char * rope_variant = (ocl_f16_packed(s0) || s0->type == GGML_TYPE_F16) ? "_f16" : "_f32";
+    const char * rope_base    = is_neox                   ? "kernel_rope_neox"   :
+                                (is_mrope && !is_vision)  ? "kernel_rope_multi"  :
+                                is_vision                 ? "kernel_rope_vision" :
+                                                            "kernel_rope_norm";
 
-    if (is_neox) {
-        switch (s0->type) {
-            case GGML_TYPE_F32:
-                kernel_name = "kernel_rope_neox_f32";
-                break;
-            case GGML_TYPE_F16:
-                kernel_name = "kernel_rope_neox_f16";
-                break;
-            default:
-                GGML_ASSERT(false);
-        };
-    } else if (is_mrope && !is_vision) {
-        switch (s0->type) {
-            case GGML_TYPE_F32:
-                kernel_name = "kernel_rope_multi_f32";
-                break;
-            case GGML_TYPE_F16:
-                kernel_name = "kernel_rope_multi_f16";
-                break;
-            default:
-                GGML_ASSERT(false);
-        };
-    } else if (is_vision) {
-        switch (s0->type) {
-            case GGML_TYPE_F32:
-                kernel_name = "kernel_rope_vision_f32";
-                break;
-            case GGML_TYPE_F16:
-                kernel_name = "kernel_rope_vision_f16";
-                break;
-            default:
-                GGML_ASSERT(false);
-        }
-    } else {
-        switch (s0->type) {
-            case GGML_TYPE_F32:
-                kernel_name = "kernel_rope_norm_f32";
-                break;
-            case GGML_TYPE_F16:
-                kernel_name = "kernel_rope_norm_f16";
-                break;
-            default:
-                GGML_ASSERT(false);
-        };
+    char kernel_name[64];
+    snprintf(kernel_name, sizeof(kernel_name), "%s%s", rope_base, rope_variant);
+
+    cl_kernel kernel = b->kmgr->get("rope/rope", kernel_name);
+    if (kernel == nullptr) {
+        GGML_LOG_ERROR("rope: cannot find kernel %s\n", kernel_name);
+        return false;
     }
-
-    kernel = b->kmgr->get("rope/rope", kernel_name);
 
     ocl_kernel_call call;
     call.kernel    = kernel;

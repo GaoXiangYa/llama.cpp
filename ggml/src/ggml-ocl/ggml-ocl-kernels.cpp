@@ -23,6 +23,22 @@ static const ocl_kernel_def g_kernel_defs[] = {
     { "rmsnorm/rmsnorm",       OCL_KERNEL_GENERIC },
     { "glu/glu",               OCL_KERNEL_GENERIC },
     { "mul/mul",               OCL_KERNEL_GENERIC },
+    { "rope/rope",             OCL_KERNEL_GENERIC },
+    { "add/kernel_add_f16",                   OCL_KERNEL_GENERIC },
+    { "mul/mul_f16",                          OCL_KERNEL_GENERIC },
+    { "glu/swiglu_f16",                       OCL_KERNEL_GENERIC },
+    { "rmsnorm/rmsnorm_f16",                  OCL_KERNEL_GENERIC },
+    { "softmax/softmax_f16",                  OCL_KERNEL_GENERIC },
+    { "get_rows/get_rows_f16_i32_f16",        OCL_KERNEL_GENERIC },
+    { "set_rows/set_rows_f16_i64_f16",        OCL_KERNEL_GENERIC },
+    { "set_rows/set_rows_f32_i64_f16",        OCL_KERNEL_GENERIC },
+    { "set_rows/set_rows_f16_i64_f32",        OCL_KERNEL_GENERIC },
+    { "mul_mat/gemv_q4_1_f16",                OCL_KERNEL_GENERIC },
+    { "mul_mat/gemv_f32_f16",                 OCL_KERNEL_GENERIC },
+    { "mul_mat/gemv_f16_f16",                 OCL_KERNEL_GENERIC },
+    { "mul_mat/gemm_q4_1_f16",                OCL_KERNEL_GENERIC },
+    { "mul_mat/gemm_f32_f16",                 OCL_KERNEL_GENERIC },
+    { "mul_mat/gemm_f16_f16",                 OCL_KERNEL_GENERIC },
 };
 
 static const std::string & ocl_kernel_source(const char * src_id) {
@@ -107,6 +123,96 @@ static const std::string & ocl_kernel_source(const char * src_id) {
     if (strcmp(src_id, "rope/rope") == 0) {
         static const std::string src{
 #include "rope/rope.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "add/kernel_add_f16") == 0) {
+        static const std::string src{
+#include "add/kernel_add_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "mul/mul_f16") == 0) {
+        static const std::string src{
+#include "mul/mul_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "glu/swiglu_f16") == 0) {
+        static const std::string src{
+#include "glu/swiglu_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "rmsnorm/rmsnorm_f16") == 0) {
+        static const std::string src{
+#include "rmsnorm/rmsnorm_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "softmax/softmax_f16") == 0) {
+        static const std::string src{
+#include "softmax/softmax_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "get_rows/get_rows_f16_i32_f16") == 0) {
+        static const std::string src{
+#include "get_rows/get_rows_f16_i32_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "set_rows/set_rows_f16_i64_f16") == 0) {
+        static const std::string src{
+#include "set_rows/set_rows_f16_i64_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "set_rows/set_rows_f32_i64_f16") == 0) {
+        static const std::string src{
+#include "set_rows/set_rows_f32_i64_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "set_rows/set_rows_f16_i64_f32") == 0) {
+        static const std::string src{
+#include "set_rows/set_rows_f16_i64_f32.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "mul_mat/gemv_q4_1_f16") == 0) {
+        static const std::string src{
+#include "mul_mat/gemv_q4_1_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "mul_mat/gemv_f32_f16") == 0) {
+        static const std::string src{
+#include "mul_mat/gemv_f32_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "mul_mat/gemv_f16_f16") == 0) {
+        static const std::string src{
+#include "mul_mat/gemv_f16_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "mul_mat/gemm_q4_1_f16") == 0) {
+        static const std::string src{
+#include "mul_mat/gemm_q4_1_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "mul_mat/gemm_f32_f16") == 0) {
+        static const std::string src{
+#include "mul_mat/gemm_f32_f16.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "mul_mat/gemm_f16_f16") == 0) {
+        static const std::string src{
+#include "mul_mat/gemm_f16_f16.cl.h"
         };
         return src;
     }
@@ -196,7 +302,15 @@ void ocl_kernel_mgr::compile_all(ggml_ocl_backend * backend) {
 
 cl_kernel ocl_kernel_mgr::get(const char * src_id, const char * fn_name) {
     auto it = entries_.find(src_id);
-    if (it == entries_.end() || it->second.state != KS_OK) {
+    if (it == entries_.end()) {
+        // 源码没被编译过。最常见的成因: 加了 .cl 和 CMakeLists 条目, 却忘了往
+        // g_kernel_defs 里加, 于是这个源从头到尾不存在。以前这里是静默返回,
+        // 排查起来只能靠猜。
+        GGML_LOG_ERROR("ggml-ocl: kernel source '%s' was never compiled (missing from g_kernel_defs?)\n", src_id);
+        return nullptr;
+    }
+    if (it->second.state != KS_OK) {
+        GGML_LOG_ERROR("ggml-ocl: kernel source '%s' failed to build\n", src_id);
         return nullptr;
     }
     const ocl_kernel_entry & entry = it->second;

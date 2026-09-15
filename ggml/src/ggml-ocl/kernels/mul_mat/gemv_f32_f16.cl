@@ -1,6 +1,7 @@
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-kernel void gemv_f16_f32(
+// fp16 存储: src0/src1/dst 三个 F32 张量在设备上都是 half
+kernel void gemv_f32_f16(
         global const char* src0, ulong offset0,
         global const char* src1, ulong offset1,
         global char* dst, ulong offsetd,
@@ -22,7 +23,6 @@ kernel void gemv_f16_f32(
     const int i11 = i1;
     const int i12 = i2;
 
-    // GQA/MQA broadcast: src1 的 head 数 ne12 可能是 src0 的整数倍
     const int i01 = i1 / (ne12 / ne02);
     const int i02 = i2 / (ne13 / ne03);
 
@@ -35,17 +35,16 @@ kernel void gemv_f16_f32(
     }
 
     global const half* src0_ptr = (global const half*)(src0 + g_row * nb01 + i01 * nb02 + i02 * nb03);
-    global const float* src1_ptr = (global const float*)(src1 + i11 * nb12 + i12 * nb13);
-    global float* dst_ptr = (global float*)(dst + i1 * nb2 + i2 * nb3);
+    global const half* src1_ptr = (global const half*)(src1 + i11 * nb12 + i12 * nb13);
+    global half* dst_ptr = (global half*)(dst + i1 * nb2 + i2 * nb3);
 
     float sum = 0.0f;
     for (int i = lane_id; i < ne00; i += warp_size) {
-        sum += convert_float(src0_ptr[i]) * src1_ptr[i];
+        sum += convert_float(src0_ptr[i]) * convert_float(src1_ptr[i]);
     }
     sum = sub_group_reduce_add(sum);
 
     if (lane_id == 0) {
-        dst_ptr[g_row] = sum;
+        dst_ptr[g_row] = convert_half(sum);
     }
 }
-

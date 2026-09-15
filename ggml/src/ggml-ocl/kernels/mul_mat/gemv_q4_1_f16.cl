@@ -1,6 +1,7 @@
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-kernel void gemv_q4_1_f32(
+// fp16 存储: 激活与输出在设备上是 half, 权重仍是 Q4_1
+kernel void gemv_q4_1_f16(
         global const char* src0, ulong offset0,
         global const char* src1, ulong offset1,
         global char* dst, ulong offsetd,
@@ -35,8 +36,8 @@ kernel void gemv_q4_1_f32(
     }
 
     global const uchar* src0_row = (global const uchar*)(src0 + g_row * nb01 + i01 * nb02 + i02 * nb03);
-    global const float* src1_ptr = (global const float*)(src1 + i11 * nb12 + i12 * nb13);
-    global float* dst_ptr = (global float*) (dst + i1 * nb2 + i2 * nb3);
+    global const half*  src1_ptr = (global const half*) (src1 + i11 * nb12 + i12 * nb13);
+    global half*        dst_ptr  = (global half*)       (dst + i1 * nb2 + i2 * nb3);
 
     float sum = 0.0f;
     for (int blk = lane_id; blk < blks_per_row; blk += warp_size) {
@@ -52,14 +53,13 @@ kernel void gemv_q4_1_f32(
             const uchar packed = qs[j];
             const float v0 = (float) (packed & 0x0F);
             const float v1 = (float) (packed >> 4);
-            sum += (v0 * fd + fm) * src1_ptr[col + j];
-            sum += (v1 * fd + fm) * src1_ptr[col + blk_k / 2 + j];
+            sum += (v0 * fd + fm) * convert_float(src1_ptr[col + j]);
+            sum += (v1 * fd + fm) * convert_float(src1_ptr[col + blk_k / 2 + j]);
         }
     }
     sum = sub_group_reduce_add(sum);
 
     if (lane_id == 0) {
-        dst_ptr[g_row] = sum;
+        dst_ptr[g_row] = convert_half(sum);
     }
 }
-

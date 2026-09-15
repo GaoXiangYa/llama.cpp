@@ -3,6 +3,8 @@
 // i0 在组内循环覆盖 dst 的 dim0; 广播通过 src1 维度取模实现.
 // 全部 byte-index 寻址 (nb 驱动), 天然支持非连续/permuted 布局.
 
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+
 kernel void kernel_add(
         global char * src0, ulong offset0,
         global char * src1, ulong offset1,
@@ -37,3 +39,4 @@ kernel void kernel_add(
             *((global float *)(src1_ptr + i10*nb10));
     }
 }
+

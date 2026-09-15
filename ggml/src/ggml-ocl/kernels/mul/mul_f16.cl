@@ -1,6 +1,7 @@
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-kernel void mul(
+// fp16 存储: 三个操作数在设备上都是 half
+kernel void mul_f16(
         global char * src0, ulong offset0,
         global char * src1, ulong offset1,
         global char * dst,  ulong offsetd,
@@ -29,9 +30,8 @@ kernel void mul(
 
     for (int i0 = get_local_id(0); i0 < ne0; i0 += get_local_size(0)) {
         const int i10 = i0 % ne10;
-        *((global float *)(dst_ptr + i0*nb0)) =
-            *((global float *)(src0_ptr + i0*nb00)) *
-            *((global float *)(src1_ptr + i10*nb10));
+        const float v = convert_float(*((global half *)(src0_ptr + i0*nb00))) *
+                        convert_float(*((global half *)(src1_ptr + i10*nb10)));
+        *((global half *)(dst_ptr + i0*nb0)) = convert_half(v);
     }
 }
-

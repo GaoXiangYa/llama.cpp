@@ -8,6 +8,9 @@
 #include <string>
 #include <vector>
 
+#include <cstdlib>
+#include <cstring>
+
 extern struct ggml_backend_device_i ggml_ocl_device_interface;
 
 // ---------------------------------------------------------------------------
@@ -16,6 +19,17 @@ extern struct ggml_backend_device_i ggml_ocl_device_interface;
 
 static std::vector<ggml_backend_device> g_ggml_ocl_devices;
 static std::vector<std::unique_ptr<ggml_ocl_device_context>> g_ggml_ocl_dev_ctxs;
+
+// fp16 存储开关: 必须在权重上传之前定下来, 所以在设备探测阶段设置, 不能等到 backend init
+static bool g_ggml_ocl_fp16_storage = false;
+
+bool ggml_ocl_fp16_storage() {
+    return g_ggml_ocl_fp16_storage;
+}
+
+void ggml_ocl_fp16_storage_set(bool enable) {
+    g_ggml_ocl_fp16_storage = enable;
+}
 
 static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg * reg) {
     std::vector<ggml_backend_device> found;
@@ -153,6 +167,23 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
 
         dev_ctx->max_alloc = max_alloc;
         dev_ctx->alignment = align_bits > 0 ? align_bits / 8 : 128;
+
+        // fp16 存储: F32 张量在设备上以 half 存放。开关必须在权重上传前定下来,
+        // 且进程内唯一 (多设备混用不同存储精度不在此支持)。
+        {
+            char ext[4096] = {0};
+            clGetDeviceInfo(d.id, CL_DEVICE_EXTENSIONS, sizeof(ext), ext, nullptr);
+            const bool has_fp16 = strstr(ext, "cl_khr_fp16") != nullptr;
+
+            const char * env  = getenv("GGML_OCL_FP16");
+            const bool   want = env != nullptr && env[0] != 0 && atoi(env) != 0;
+
+            if (want && !has_fp16) {
+                GGML_LOG_ERROR("ggml-ocl: GGML_OCL_FP16=1 but device has no cl_khr_fp16, disabled.\n");
+            }
+            ggml_ocl_fp16_storage_set(want && has_fp16);
+            GGML_LOG_INFO("ggml-ocl: fp16 storage: %s\n", ggml_ocl_fp16_storage() ? "on" : "off");
+        }
 
         // 权重加载阶段 backend 尚未创建，需要一个设备级 copy queue 上传权重
         cl_int qerr = CL_SUCCESS;

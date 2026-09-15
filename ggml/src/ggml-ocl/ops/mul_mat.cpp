@@ -6,6 +6,15 @@
 #include <CL/cl_platform.h>
 
 namespace ops {
+
+// fp16 存储模式下激活以 half 存放, 选对应的 kernel 变体
+static cl_kernel mul_mat_kernel(ggml_ocl_backend *  b,
+                                const char *        src_id,
+                                const char *        fn_f32,
+                                const char *        fn_f16,
+                                const ggml_tensor * src1) {
+    return ocl_pick_kernel(b, src_id, fn_f32, fn_f16, ocl_f16_packed(src1));
+}
 // 调试: 进一步细分禁用 MUL_MAT，避免一刀切全部回退 CPU。
 // 用法示例:
 //   GGML_OCL_DISABLE_MUL_MAT=q4_1
@@ -76,7 +85,7 @@ static bool gemv_q4_1_f32_run(ggml_ocl_backend *  b,
                               const ggml_tensor * src0,
                               const ggml_tensor * src1,
                               ggml_tensor *       dst) {
-    cl_kernel k = b->kmgr->get("mul_mat/gemv_q4_1_f32", "gemv_q4_1_f32");
+    cl_kernel k = mul_mat_kernel(b, "mul_mat/gemv_q4_1_f32", "gemv_q4_1_f32", "gemv_q4_1_f16", src1);
     if (k == nullptr) {
         GGML_LOG_ERROR("cannot find gemv_q4_1_f32 kernel");
         return false;
@@ -104,9 +113,9 @@ static bool gemv_q4_1_f32_run(ggml_ocl_backend *  b,
     ggml_ocl_tensor_extra * e1 = (ggml_ocl_tensor_extra *) src1->extra;
     ggml_ocl_tensor_extra * ed = (ggml_ocl_tensor_extra *) dst->extra;
 
-    cl_ulong offset0 = e0->offset + src0->view_offs;
-    cl_ulong offset1 = e1->offset + src1->view_offs;
-    cl_ulong offsetd = ed->offset + dst->view_offs;
+    cl_ulong offset0 = ocl_dev_offset(src0, e0);
+    cl_ulong offset1 = ocl_dev_offset(src1, e1);
+    cl_ulong offsetd = ocl_dev_offset(dst,  ed);
 
     constexpr int blk_k        = 32;
     const int     blks_per_row = ne00 / blk_k;
@@ -122,26 +131,26 @@ static bool gemv_q4_1_f32_run(ggml_ocl_backend *  b,
     call.arg_i32(ne01);
     call.arg_i32(ne02);
     call.arg_i32(ne03);
-    call.arg_i32(nb00);
-    call.arg_i32(nb01);
-    call.arg_i32(nb02);
-    call.arg_i32(nb03);
+    call.arg_i32(ocl_nb(src0, nb00));
+    call.arg_i32(ocl_nb(src0, nb01));
+    call.arg_i32(ocl_nb(src0, nb02));
+    call.arg_i32(ocl_nb(src0, nb03));
     call.arg_i32(ne10);
     call.arg_i32(ne11);
     call.arg_i32(ne12);
     call.arg_i32(ne13);
-    call.arg_i32(nb10);
-    call.arg_i32(nb11);
-    call.arg_i32(nb12);
-    call.arg_i32(nb13);
+    call.arg_i32(ocl_nb(src1, nb10));
+    call.arg_i32(ocl_nb(src1, nb11));
+    call.arg_i32(ocl_nb(src1, nb12));
+    call.arg_i32(ocl_nb(src1, nb13));
     call.arg_i32(ne0);
     call.arg_i32(ne1);
     call.arg_i32(ne2);
     call.arg_i32(ne3);
-    call.arg_i32(nb0);
-    call.arg_i32(nb1);
-    call.arg_i32(nb2);
-    call.arg_i32(nb3);
+    call.arg_i32(ocl_nb(dst, nb0));
+    call.arg_i32(ocl_nb(dst, nb1));
+    call.arg_i32(ocl_nb(dst, nb2));
+    call.arg_i32(ocl_nb(dst, nb3));
     call.arg_i32(blk_k);
     call.arg_i32(blk_bytes);
     call.arg_i32(blks_per_row);
@@ -154,7 +163,7 @@ static bool gemv_f32_f32_run(ggml_ocl_backend *  b,
                              const ggml_tensor * src0,
                              const ggml_tensor * src1,
                              ggml_tensor *       dst) {
-    cl_kernel k = b->kmgr->get("mul_mat/gemv_f32_f32", "gemv_f32_f32");
+    cl_kernel k = mul_mat_kernel(b, "mul_mat/gemv_f32_f32", "gemv_f32_f32", "gemv_f32_f16", src1);
     if (k == nullptr) {
         GGML_LOG_ERROR("cannot find gemv_f32_f32 kernel!\n");
         return false;
@@ -182,9 +191,9 @@ static bool gemv_f32_f32_run(ggml_ocl_backend *  b,
     ggml_ocl_tensor_extra * e1 = (ggml_ocl_tensor_extra *) src1->extra;
     ggml_ocl_tensor_extra * ed = (ggml_ocl_tensor_extra *) dst->extra;
 
-    cl_ulong offset0 = e0->offset + src0->view_offs;
-    cl_ulong offset1 = e1->offset + src1->view_offs;
-    cl_ulong offsetd = ed->offset + dst->view_offs;
+    cl_ulong offset0 = ocl_dev_offset(src0, e0);
+    cl_ulong offset1 = ocl_dev_offset(src1, e1);
+    cl_ulong offsetd = ocl_dev_offset(dst,  ed);
 
     call.arg_cl_mem(e0->data_device);
     call.arg_u64(offset0);
@@ -196,26 +205,26 @@ static bool gemv_f32_f32_run(ggml_ocl_backend *  b,
     call.arg_i32(ne01);
     call.arg_i32(ne02);
     call.arg_i32(ne03);
-    call.arg_i32(nb00);
-    call.arg_i32(nb01);
-    call.arg_i32(nb02);
-    call.arg_i32(nb03);
+    call.arg_i32(ocl_nb(src0, nb00));
+    call.arg_i32(ocl_nb(src0, nb01));
+    call.arg_i32(ocl_nb(src0, nb02));
+    call.arg_i32(ocl_nb(src0, nb03));
     call.arg_i32(ne10);
     call.arg_i32(ne11);
     call.arg_i32(ne12);
     call.arg_i32(ne13);
-    call.arg_i32(nb10);
-    call.arg_i32(nb11);
-    call.arg_i32(nb12);
-    call.arg_i32(nb13);
+    call.arg_i32(ocl_nb(src1, nb10));
+    call.arg_i32(ocl_nb(src1, nb11));
+    call.arg_i32(ocl_nb(src1, nb12));
+    call.arg_i32(ocl_nb(src1, nb13));
     call.arg_i32(ne0);
     call.arg_i32(ne1);
     call.arg_i32(ne2);
     call.arg_i32(ne3);
-    call.arg_i32(nb0);
-    call.arg_i32(nb1);
-    call.arg_i32(nb2);
-    call.arg_i32(nb3);
+    call.arg_i32(ocl_nb(dst, nb0));
+    call.arg_i32(ocl_nb(dst, nb1));
+    call.arg_i32(ocl_nb(dst, nb2));
+    call.arg_i32(ocl_nb(dst, nb3));
 
     call.enqueue(b);
     return true;
@@ -225,7 +234,7 @@ static bool gemv_f16_f32_run(ggml_ocl_backend *  b,
                              const ggml_tensor * src0,
                              const ggml_tensor * src1,
                              ggml_tensor *       dst) {
-    cl_kernel k = b->kmgr->get("mul_mat/gemv_f16_f32", "gemv_f16_f32");
+    cl_kernel k = mul_mat_kernel(b, "mul_mat/gemv_f16_f32", "gemv_f16_f32", "gemv_f16_f16", src1);
     if (k == nullptr) {
         GGML_LOG_ERROR("cannot find gemv_f16_f32 kernel!\n");
         return false;
@@ -253,9 +262,9 @@ static bool gemv_f16_f32_run(ggml_ocl_backend *  b,
     ggml_ocl_tensor_extra * e1 = (ggml_ocl_tensor_extra *) src1->extra;
     ggml_ocl_tensor_extra * ed = (ggml_ocl_tensor_extra *) dst->extra;
 
-    cl_ulong offset0 = e0->offset + src0->view_offs;
-    cl_ulong offset1 = e1->offset + src1->view_offs;
-    cl_ulong offsetd = ed->offset + dst->view_offs;
+    cl_ulong offset0 = ocl_dev_offset(src0, e0);
+    cl_ulong offset1 = ocl_dev_offset(src1, e1);
+    cl_ulong offsetd = ocl_dev_offset(dst,  ed);
 
     call.arg_cl_mem(e0->data_device);
     call.arg_u64(offset0);
@@ -267,26 +276,26 @@ static bool gemv_f16_f32_run(ggml_ocl_backend *  b,
     call.arg_i32(ne01);
     call.arg_i32(ne02);
     call.arg_i32(ne03);
-    call.arg_i32(nb00);
-    call.arg_i32(nb01);
-    call.arg_i32(nb02);
-    call.arg_i32(nb03);
+    call.arg_i32(ocl_nb(src0, nb00));
+    call.arg_i32(ocl_nb(src0, nb01));
+    call.arg_i32(ocl_nb(src0, nb02));
+    call.arg_i32(ocl_nb(src0, nb03));
     call.arg_i32(ne10);
     call.arg_i32(ne11);
     call.arg_i32(ne12);
     call.arg_i32(ne13);
-    call.arg_i32(nb10);
-    call.arg_i32(nb11);
-    call.arg_i32(nb12);
-    call.arg_i32(nb13);
+    call.arg_i32(ocl_nb(src1, nb10));
+    call.arg_i32(ocl_nb(src1, nb11));
+    call.arg_i32(ocl_nb(src1, nb12));
+    call.arg_i32(ocl_nb(src1, nb13));
     call.arg_i32(ne0);
     call.arg_i32(ne1);
     call.arg_i32(ne2);
     call.arg_i32(ne3);
-    call.arg_i32(nb0);
-    call.arg_i32(nb1);
-    call.arg_i32(nb2);
-    call.arg_i32(nb3);
+    call.arg_i32(ocl_nb(dst, nb0));
+    call.arg_i32(ocl_nb(dst, nb1));
+    call.arg_i32(ocl_nb(dst, nb2));
+    call.arg_i32(ocl_nb(dst, nb3));
 
     call.enqueue(b);
     return true;
@@ -296,7 +305,7 @@ static bool gemm_f32_f32_run(ggml_ocl_backend *  b,
                              const ggml_tensor * src0,
                              const ggml_tensor * src1,
                              ggml_tensor *       dst) {
-    cl_kernel k = b->kmgr->get("mul_mat/gemm_f32_f32", "gemm_f32_f32");
+    cl_kernel k = mul_mat_kernel(b, "mul_mat/gemm_f32_f32", "gemm_f32_f32", "gemm_f32_f16", src1);
     if (k == nullptr) {
         GGML_LOG_ERROR("cannot find gemm_f32_f32 kernel!");
         return false;
@@ -326,9 +335,9 @@ static bool gemm_f32_f32_run(ggml_ocl_backend *  b,
     ggml_ocl_tensor_extra * e1 = (ggml_ocl_tensor_extra *) src1->extra;
     ggml_ocl_tensor_extra * ed = (ggml_ocl_tensor_extra *) dst->extra;
 
-    cl_ulong offset0 = e0->offset + src0->view_offs;
-    cl_ulong offset1 = e1->offset + src1->view_offs;
-    cl_ulong offsetd = ed->offset + dst->view_offs;
+    cl_ulong offset0 = ocl_dev_offset(src0, e0);
+    cl_ulong offset1 = ocl_dev_offset(src1, e1);
+    cl_ulong offsetd = ocl_dev_offset(dst,  ed);
 
     call.arg_cl_mem(e0->data_device);
     call.arg_u64(offset0);
@@ -340,26 +349,26 @@ static bool gemm_f32_f32_run(ggml_ocl_backend *  b,
     call.arg_i32(ne01);
     call.arg_i32(ne02);
     call.arg_i32(ne03);
-    call.arg_i32(nb00);
-    call.arg_i32(nb01);
-    call.arg_i32(nb02);
-    call.arg_i32(nb03);
+    call.arg_i32(ocl_nb(src0, nb00));
+    call.arg_i32(ocl_nb(src0, nb01));
+    call.arg_i32(ocl_nb(src0, nb02));
+    call.arg_i32(ocl_nb(src0, nb03));
     call.arg_i32(ne10);
     call.arg_i32(ne11);
     call.arg_i32(ne12);
     call.arg_i32(ne13);
-    call.arg_i32(nb10);
-    call.arg_i32(nb11);
-    call.arg_i32(nb12);
-    call.arg_i32(nb13);
+    call.arg_i32(ocl_nb(src1, nb10));
+    call.arg_i32(ocl_nb(src1, nb11));
+    call.arg_i32(ocl_nb(src1, nb12));
+    call.arg_i32(ocl_nb(src1, nb13));
     call.arg_i32(ne0);
     call.arg_i32(ne1);
     call.arg_i32(ne2);
     call.arg_i32(ne3);
-    call.arg_i32(nb0);
-    call.arg_i32(nb1);
-    call.arg_i32(nb2);
-    call.arg_i32(nb3);
+    call.arg_i32(ocl_nb(dst, nb0));
+    call.arg_i32(ocl_nb(dst, nb1));
+    call.arg_i32(ocl_nb(dst, nb2));
+    call.arg_i32(ocl_nb(dst, nb3));
     call.arg_i32(num_wg_n);
 
     call.enqueue(b);
@@ -370,7 +379,7 @@ static bool gemm_f16_f32_run(ggml_ocl_backend *  b,
                              const ggml_tensor * src0,
                              const ggml_tensor * src1,
                              ggml_tensor *       dst) {
-    cl_kernel k = b->kmgr->get("mul_mat/gemm_f16_f32", "gemm_f16_f32");
+    cl_kernel k = mul_mat_kernel(b, "mul_mat/gemm_f16_f32", "gemm_f16_f32", "gemm_f16_f16", src1);
     if (k == nullptr) {
         GGML_LOG_ERROR("cannot find gemm_f16_f32 kernel!");
         return false;
@@ -400,9 +409,9 @@ static bool gemm_f16_f32_run(ggml_ocl_backend *  b,
     ggml_ocl_tensor_extra * e1 = (ggml_ocl_tensor_extra *) src1->extra;
     ggml_ocl_tensor_extra * ed = (ggml_ocl_tensor_extra *) dst->extra;
 
-    cl_ulong offset0 = e0->offset + src0->view_offs;
-    cl_ulong offset1 = e1->offset + src1->view_offs;
-    cl_ulong offsetd = ed->offset + dst->view_offs;
+    cl_ulong offset0 = ocl_dev_offset(src0, e0);
+    cl_ulong offset1 = ocl_dev_offset(src1, e1);
+    cl_ulong offsetd = ocl_dev_offset(dst,  ed);
 
     call.arg_cl_mem(e0->data_device);
     call.arg_u64(offset0);
@@ -414,26 +423,26 @@ static bool gemm_f16_f32_run(ggml_ocl_backend *  b,
     call.arg_i32(ne01);
     call.arg_i32(ne02);
     call.arg_i32(ne03);
-    call.arg_i32(nb00);
-    call.arg_i32(nb01);
-    call.arg_i32(nb02);
-    call.arg_i32(nb03);
+    call.arg_i32(ocl_nb(src0, nb00));
+    call.arg_i32(ocl_nb(src0, nb01));
+    call.arg_i32(ocl_nb(src0, nb02));
+    call.arg_i32(ocl_nb(src0, nb03));
     call.arg_i32(ne10);
     call.arg_i32(ne11);
     call.arg_i32(ne12);
     call.arg_i32(ne13);
-    call.arg_i32(nb10);
-    call.arg_i32(nb11);
-    call.arg_i32(nb12);
-    call.arg_i32(nb13);
+    call.arg_i32(ocl_nb(src1, nb10));
+    call.arg_i32(ocl_nb(src1, nb11));
+    call.arg_i32(ocl_nb(src1, nb12));
+    call.arg_i32(ocl_nb(src1, nb13));
     call.arg_i32(ne0);
     call.arg_i32(ne1);
     call.arg_i32(ne2);
     call.arg_i32(ne3);
-    call.arg_i32(nb0);
-    call.arg_i32(nb1);
-    call.arg_i32(nb2);
-    call.arg_i32(nb3);
+    call.arg_i32(ocl_nb(dst, nb0));
+    call.arg_i32(ocl_nb(dst, nb1));
+    call.arg_i32(ocl_nb(dst, nb2));
+    call.arg_i32(ocl_nb(dst, nb3));
     call.arg_i32(num_wg_n);
 
     call.enqueue(b);
@@ -444,7 +453,7 @@ static bool gemm_q4_1_f32_run(ggml_ocl_backend *  b,
                               const ggml_tensor * src0,
                               const ggml_tensor * src1,
                               ggml_tensor *       dst) {
-    cl_kernel k = b->kmgr->get("mul_mat/gemm_q4_1_f32", "gemm_q4_1_f32");
+    cl_kernel k = mul_mat_kernel(b, "mul_mat/gemm_q4_1_f32", "gemm_q4_1_f32", "gemm_q4_1_f16", src1);
     if (k == nullptr) {
         GGML_LOG_ERROR("cannot find gemm_q4_1_f32 kernel!\n");
         return false;
@@ -474,9 +483,9 @@ static bool gemm_q4_1_f32_run(ggml_ocl_backend *  b,
     ggml_ocl_tensor_extra * e1 = (ggml_ocl_tensor_extra *) src1->extra;
     ggml_ocl_tensor_extra * ed = (ggml_ocl_tensor_extra *) dst->extra;
 
-    cl_ulong offset0 = e0->offset + src0->view_offs;
-    cl_ulong offset1 = e1->offset + src1->view_offs;
-    cl_ulong offsetd = ed->offset + dst->view_offs;
+    cl_ulong offset0 = ocl_dev_offset(src0, e0);
+    cl_ulong offset1 = ocl_dev_offset(src1, e1);
+    cl_ulong offsetd = ocl_dev_offset(dst,  ed);
 
     call.arg_cl_mem(e0->data_device);
     call.arg_u64(offset0);
@@ -488,26 +497,26 @@ static bool gemm_q4_1_f32_run(ggml_ocl_backend *  b,
     call.arg_i32(ne01);
     call.arg_i32(ne02);
     call.arg_i32(ne03);
-    call.arg_i32(nb00);
-    call.arg_i32(nb01);
-    call.arg_i32(nb02);
-    call.arg_i32(nb03);
+    call.arg_i32(ocl_nb(src0, nb00));
+    call.arg_i32(ocl_nb(src0, nb01));
+    call.arg_i32(ocl_nb(src0, nb02));
+    call.arg_i32(ocl_nb(src0, nb03));
     call.arg_i32(ne10);
     call.arg_i32(ne11);
     call.arg_i32(ne12);
     call.arg_i32(ne13);
-    call.arg_i32(nb10);
-    call.arg_i32(nb11);
-    call.arg_i32(nb12);
-    call.arg_i32(nb13);
+    call.arg_i32(ocl_nb(src1, nb10));
+    call.arg_i32(ocl_nb(src1, nb11));
+    call.arg_i32(ocl_nb(src1, nb12));
+    call.arg_i32(ocl_nb(src1, nb13));
     call.arg_i32(ne0);
     call.arg_i32(ne1);
     call.arg_i32(ne2);
     call.arg_i32(ne3);
-    call.arg_i32(nb0);
-    call.arg_i32(nb1);
-    call.arg_i32(nb2);
-    call.arg_i32(nb3);
+    call.arg_i32(ocl_nb(dst, nb0));
+    call.arg_i32(ocl_nb(dst, nb1));
+    call.arg_i32(ocl_nb(dst, nb2));
+    call.arg_i32(ocl_nb(dst, nb3));
     call.arg_i32(num_wg_n);
 
     call.enqueue(b);

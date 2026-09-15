@@ -1,6 +1,6 @@
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-kernel void set_rows_f32_i64_f32(
+kernel void set_rows_f16_i64_f32(
         global char * src0, ulong offset0,
         global char * src1, ulong offset1,
         global char * dst,  ulong offsetd,
@@ -27,7 +27,7 @@ kernel void set_rows_f32_i64_f32(
     const int lsz0 = get_local_size(0);
     const int i00  = get_local_id(0);
 
-    global float * src0_ptr = (global float *)(src0 + i01*nb01 + i02*nb02 + i03*nb03);
+    global half  * src0_ptr = (global half  *)(src0 + i01*nb01 + i02*nb02 + i03*nb03);
     global long  * src1_ptr = (global long  *)(src1 + i01*nb10 + i12*nb11 + i13*nb12);
 
     const long dst_row = src1_ptr[0];
@@ -35,7 +35,6 @@ kernel void set_rows_f32_i64_f32(
     global float * dst_ptr = (global float *)(dst + dst_row*nb1 + i02*nb2 + i03*nb3);
 
     for (int i = i00; i < nblk0; i += lsz0) {
-        dst_ptr[i] = src0_ptr[i];
+        dst_ptr[i] = vload_half(0, src0_ptr + i);
     }
 }
-

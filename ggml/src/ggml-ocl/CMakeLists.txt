@@ -81,6 +81,21 @@ set(GGML_OCL_KERNELS
     glu/glu
     mul/mul
     rope/rope
+    add/kernel_add_f16
+    mul/mul_f16
+    glu/swiglu_f16
+    rmsnorm/rmsnorm_f16
+    softmax/softmax_f16
+    get_rows/get_rows_f16_i32_f16
+    set_rows/set_rows_f16_i64_f16
+    set_rows/set_rows_f32_i64_f16
+    set_rows/set_rows_f16_i64_f32
+    mul_mat/gemv_q4_1_f16
+    mul_mat/gemv_f32_f16
+    mul_mat/gemv_f16_f16
+    mul_mat/gemm_q4_1_f16
+    mul_mat/gemm_f32_f16
+    mul_mat/gemm_f16_f16
 )
 
 foreach (K ${GGML_OCL_KERNELS})

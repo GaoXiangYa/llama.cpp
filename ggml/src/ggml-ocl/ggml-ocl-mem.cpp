@@ -215,15 +215,29 @@ static void ggml_ocl_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor
     GGML_ASSERT(extra != nullptr);
     GGML_ASSERT(extra->layout == LAYOUT_AOS && "SoA-DM arrives in S6");
 
-    cl_ulong    eff_offset = extra->offset + tensor->view_offs + offset;
+    // fp16 存储: host 侧给的是 F32 数据, 设备上要存 half。
+    // tmp 的生命周期只到这里, 所以转换路径必须等写完再返回。
+    std::vector<ggml_fp16_t> tmp;
+    bool                     converted = false;
+    if (ocl_f16_packed(tensor)) {
+        GGML_ASSERT(offset % sizeof(float) == 0 && size % sizeof(float) == 0);
+        const size_t n = size / sizeof(float);
+        tmp.resize(n);
+        ggml_fp32_to_fp16_row((const float *) data, tmp.data(), n);
+        data      = tmp.data();
+        size      = n * sizeof(ggml_fp16_t);
+        converted = true;
+    }
+
+    cl_ulong    eff_offset = ocl_dev_offset(tensor, extra) + ocl_dev_bytes(tensor, offset);
     cl_event    evt        = nullptr;
     cl_event *  evt_ptr    = backend ? &evt : nullptr;
-    cl_bool     blocking   = backend ? CL_FALSE : CL_TRUE;
+    cl_bool     blocking   = (backend && !converted) ? CL_FALSE : CL_TRUE;
 
     OCL_CHECK(clEnqueueWriteBuffer(ggml_ocl_buffer_copy_queue(buffer), extra->data_device, blocking,
                                    eff_offset, size, data, 0, nullptr, evt_ptr));
     // 记录到 copy 事件列表: S8 的 graph 首节点等待; 超限强制结算防泄漏
-    if (backend) {
+    if (evt_ptr != nullptr) {
         backend->pending_copy_events.push_back(evt);
         if (backend->pending_copy_events.size() >= 32) {
             ocl_exec_wait_pending_copies(backend);
@@ -236,9 +250,22 @@ static void ggml_ocl_buffer_get_tensor(ggml_backend_buffer_t buffer, const ggml_
     ggml_ocl_tensor_extra * extra = (ggml_ocl_tensor_extra *) tensor->extra;
     GGML_ASSERT(extra != nullptr);
 
-    cl_ulong eff_offset = extra->offset + tensor->view_offs + offset;
-    OCL_CHECK(clEnqueueReadBuffer(ggml_ocl_buffer_copy_queue(buffer), extra->data_device, CL_TRUE,
-                                  eff_offset, size, data, 0, nullptr, nullptr));
+    cl_command_queue q          = ggml_ocl_buffer_copy_queue(buffer);
+    cl_ulong         eff_offset = ocl_dev_offset(tensor, extra) + ocl_dev_bytes(tensor, offset);
+    const size_t     dev_size   = ocl_dev_bytes(tensor, size);
+
+    if (ocl_f16_packed(tensor)) {
+        GGML_ASSERT(size % sizeof(float) == 0);
+        std::vector<ggml_fp16_t> tmp(dev_size / sizeof(ggml_fp16_t));
+        OCL_CHECK(clEnqueueReadBuffer(q, extra->data_device, CL_TRUE,
+                                      eff_offset, dev_size, tmp.data(), 0, nullptr, nullptr));
+        if (!tmp.empty()) {
+            ggml_fp16_to_fp32_row(tmp.data(), (float *) data, tmp.size());
+        }
+    } else {
+        OCL_CHECK(clEnqueueReadBuffer(q, extra->data_device, CL_TRUE,
+                                      eff_offset, size, data, 0, nullptr, nullptr));
+    }
 }
 
 static void ggml_ocl_buffer_memset_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor,
@@ -248,18 +275,27 @@ static void ggml_ocl_buffer_memset_tensor(ggml_backend_buffer_t buffer, ggml_ten
     GGML_ASSERT(extra != nullptr);
 
     cl_command_queue q = ggml_ocl_buffer_copy_queue(buffer);
-    cl_ulong         eff_offset = extra->offset + tensor->view_offs + offset;
+    // 只能按 half 的字节数填, 填多了会踩到相邻张量的 slot
+    cl_ulong eff_offset = ocl_dev_offset(tensor, extra) + ocl_dev_bytes(tensor, offset);
+    size_t   dev_size   = ocl_dev_bytes(tensor, size);
+
+    if (ocl_f16_packed(tensor) && value != 0) {
+        // 非 0 填充没有 half 上的直接语义, 目前只有 0 会走到这里
+        GGML_ABORT("ggml-ocl: memset_tensor with value %u on fp16-stored F32 tensor", value);
+    }
+
     OCL_CHECK(clEnqueueFillBuffer(q, extra->data_device, &value, sizeof(value),
-                                  eff_offset, size, 0, nullptr, nullptr));
+                                  eff_offset, dev_size, 0, nullptr, nullptr));
     if (dev_ctx->backend == nullptr) {
         OCL_CHECK(clFinish(q));
     }
 }
 
 static bool ggml_ocl_buffer_cpy_tensor(ggml_backend_buffer_t buffer, const ggml_tensor * src, ggml_tensor * dst) {
-    // 仅处理同后端 (同 context) buffer 间的拷贝; 跨后端返回 false, 由 ggml get/set fallback
+    // 仅处理同后端 (同 context) buffer 间的拷贝; 跨后端返回 false, 由 ggml get/set fallback。
+    // fp16 存储靠 get/set 做转换, 所以这条裸字节路径绝不能跨后端。
     ggml_ocl_device_context * dev_ctx = ggml_ocl_buffer_dev_ctx(buffer);
-    if (src->buffer->buft->device->context != dev_ctx) {
+    if (src->buffer->buft->device == nullptr || src->buffer->buft->device->context != dev_ctx) {
         return false;
     }
 
@@ -267,12 +303,13 @@ static bool ggml_ocl_buffer_cpy_tensor(ggml_backend_buffer_t buffer, const ggml_
     ggml_ocl_tensor_extra * dst_extra = (ggml_ocl_tensor_extra *) dst->extra;
     GGML_ASSERT(src_extra != nullptr && dst_extra != nullptr);
     GGML_ASSERT(src_extra->layout == LAYOUT_AOS && dst_extra->layout == LAYOUT_AOS && "SoA-DM arrives in a later step");
+    GGML_ASSERT(ocl_f16_packed(src) == ocl_f16_packed(dst) && "mixed storage in cpy_tensor");
 
-    cl_command_queue q = ggml_ocl_buffer_copy_queue(buffer);
-    cl_ulong         src_off = src_extra->offset + src->view_offs;
-    cl_ulong         dst_off = dst_extra->offset + dst->view_offs;
+    cl_command_queue q       = ggml_ocl_buffer_copy_queue(buffer);
+    cl_ulong         src_off = ocl_dev_offset(src, src_extra);
+    cl_ulong         dst_off = ocl_dev_offset(dst, dst_extra);
     OCL_CHECK(clEnqueueCopyBuffer(q, src_extra->data_device, dst_extra->data_device,
-                                  src_off, dst_off, ggml_nbytes(src), 0, nullptr, nullptr));
+                                  src_off, dst_off, ocl_dev_bytes(src, ggml_nbytes(src)), 0, nullptr, nullptr));
     if (dev_ctx->backend == nullptr) {
         OCL_CHECK(clFinish(q));
     }

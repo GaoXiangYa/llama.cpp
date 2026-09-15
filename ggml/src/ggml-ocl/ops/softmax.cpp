@@ -15,7 +15,8 @@ static bool softmax_supports(const ggml_ocl_caps * caps, const ggml_tensor * op)
 
 static bool softmax_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
     (void) s1;
-    cl_kernel k = b->kmgr->get("softmax/softmax", "softmax");
+    const bool f16 = ocl_f16_packed(s0);
+    cl_kernel k = ocl_pick_kernel(b, "softmax/softmax", "softmax", "softmax_f16", f16);
     if (k == nullptr) {
         return false;
     }
@@ -32,10 +33,10 @@ static bool softmax_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml
     const int n_head      = s0->ne[2];
     const int n_head_log2 = 1u << (uint32_t) floorf(log2f((float) n_head));
 
-    ulong offset0 = e0->offset + s0->view_offs;
-    ulong offset1 = s1 ? (e1->offset + s1->view_offs) : offset0;
-    ulong offset2 = dst->src[2] ? (e2->offset + dst->src[2]->view_offs) : offset0;
-    ulong offsetd = ed->offset + dst->view_offs;
+    ulong offset0 = ocl_dev_offset(s0, e0);
+    ulong offset1 = s1 ? ocl_dev_offset(s1, e1) : offset0;
+    ulong offset2 = dst->src[2] ? ocl_dev_offset(dst->src[2], e2) : offset0;
+    ulong offsetd = ocl_dev_offset(dst, ed);
 
     const float m0 = powf(2.0f, -(max_bias) / n_head_log2);
     const float m1 = powf(2.0f, -(max_bias / 2.0f) / n_head_log2);
@@ -60,9 +61,9 @@ static bool softmax_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml
 
     cl_int ne12 = s1 ? s1->ne[2] : 0;
     cl_int ne13 = s1 ? s1->ne[3] : 0;
-    cl_int nb11 = s1 ? s1->nb[1] : 0;
-    cl_int nb12 = s1 ? s1->nb[2] : 0;
-    cl_int nb13 = s1 ? s1->nb[3] : 0;
+    cl_int nb11 = s1 ? ocl_nb(s1, s1->nb[1]) : 0;
+    cl_int nb12 = s1 ? ocl_nb(s1, s1->nb[2]) : 0;
+    cl_int nb13 = s1 ? ocl_nb(s1, s1->nb[3]) : 0;
 
     call.arg_cl_mem(e0->data_device);
     call.arg_u64(offset0);
@@ -80,9 +81,10 @@ static bool softmax_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml
     call.arg_i32(nb13);
 
     call.arg_i32((cl_int) dst->ne[0]);
-    call.arg_i32((cl_int) dst->nb[1]);
-    call.arg_i32((cl_int) dst->nb[2]);
-    call.arg_i32((cl_int) dst->nb[3]);
+    // kernel 对 src0 / dst 用同一组步长, 依赖两者布局一致 (原有的隐含假设)
+    call.arg_i32(ocl_nb(dst, dst->nb[1]));
+    call.arg_i32(ocl_nb(dst, dst->nb[2]));
+    call.arg_i32(ocl_nb(dst, dst->nb[3]));
 
     call.arg_i32(has_mask);
     call.arg_i32(has_sinks);

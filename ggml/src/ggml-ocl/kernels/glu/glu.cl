@@ -1,3 +1,5 @@
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+
 kernel void swiglu(global char * src0,
                    ulong         offset0,
                    global char * src1,
@@ -24,3 +26,4 @@ kernel void swiglu(global char * src0,
         pdst[i] = g * 1 / (1 + exp(-1 * g)) * u;
     }
 }
+

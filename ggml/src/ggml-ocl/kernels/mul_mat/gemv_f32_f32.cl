@@ -1,3 +1,5 @@
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+
 kernel void gemv_f32_f32(
         global const char* src0, ulong offset0,
         global const char* src1, ulong offset1,
@@ -34,7 +36,7 @@ kernel void gemv_f32_f32(
 
     global const float* src0_ptr = (global const float*)(src0 + g_row * nb01 + i01 * nb02 + i02 * nb03);
     global const float* src1_ptr = (global const float*)(src1 + i11 * nb12 + i12 * nb13);
-    global float* dst_ptr = (global float*)(dst + i1 * nb1 + i2 * nb2);
+    global float* dst_ptr = (global float*)(dst + i1 * nb2 + i2 * nb3);
 
     float sum = 0.0f;
     for (int i = lane_id; i < ne00; i += warp_size) {
@@ -46,3 +48,4 @@ kernel void gemv_f32_f32(
         dst_ptr[g_row] = sum;
     }
 }
+

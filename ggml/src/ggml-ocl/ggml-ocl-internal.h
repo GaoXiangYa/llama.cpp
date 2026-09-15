@@ -17,6 +17,8 @@
 #endif
 
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <map>
 #include <mutex>
 #include <string>
@@ -202,6 +204,41 @@ struct ggml_ocl_tensor_extra {
         layout      = LAYOUT_AOS;
     }
 };
+
+// ---------------------------------------------------------------------------
+// fp16 存储模式: F32 张量在设备上以 half 存放, ggml 侧仍报 F32。
+// 只影响 type == F32 的张量; Q4_1 / F16 / I32 等原样存放。
+// 设备上数据紧跟在 slot 起始处, 所以 extra->offset 两种模式通用, 不用动
+// ggml-alloc; 只有 view_offs / 步长 / 访问长度需要折半。
+// 开关是进程级 (设备创建时确定), 混用不同精度存储的多设备不在此支持。
+// ---------------------------------------------------------------------------
+
+bool ggml_ocl_fp16_storage();
+void ggml_ocl_fp16_storage_set(bool enable);
+
+static inline bool ocl_f16_packed(const ggml_tensor * t) {
+    return t != nullptr && t->type == GGML_TYPE_F32 && ggml_ocl_fp16_storage();
+}
+
+// 设备上的绝对字节偏移: half 存放时 view_offs 以 F32 字节计, 要折半
+static inline cl_ulong ocl_dev_offset(const ggml_tensor * t, const ggml_ocl_tensor_extra * e) {
+    return e->offset + (ocl_f16_packed(t) ? (t->view_offs >> 1) : t->view_offs);
+}
+
+// 设备访问的字节数: host 侧的 size / offset 以 F32 字节计, half 存放时要折半
+static inline size_t ocl_dev_bytes(const ggml_tensor * t, size_t n) {
+    return ocl_f16_packed(t) ? n / 2 : n;
+}
+
+// 传给 kernel 的步长: half 存放时 F32 张量的 nb[] 减半
+static inline cl_int ocl_nb(const ggml_tensor * t, size_t nb) {
+    return (cl_int) (ocl_f16_packed(t) ? (nb >> 1) : nb);
+}
+
+// 同上, 给步长参数是 ulong 的 kernel 用
+static inline cl_ulong ocl_nb64(const ggml_tensor * t, size_t nb) {
+    return (cl_ulong) (ocl_f16_packed(t) ? (nb >> 1) : nb);
+}
 
 // ---------------------------------------------------------------------------
 // pools (DESIGN.md section 16.1)
@@ -395,3 +432,30 @@ struct ggml_ocl_backend {
     ocl_stats stats;
 #endif
 };
+
+// ---------------------------------------------------------------------------
+// kernel 选择 (DESIGN.md: fp16 存储)
+//
+// f32 版留在原源里; fp16 版被拆成独立源, 约定:
+//     文件路径 = <f32 源所在目录> / <函数名>.cl     即 "文件名 == 函数名"
+// 所以 fp16 源的 src_id 能从 src_f32 的目录 + fn_f16 推出来。
+// 这样每个 fp16 kernel 可以单独优化、单独定位。
+//
+// 注意区分两个东西: src_id 是**路径** (如 "rmsnorm/rmsnorm_f16"),
+// fn 是**函数名** (如 "rmsnorm_f16")。传错会被 kmgr 记一条明确的错误。
+// ---------------------------------------------------------------------------
+
+static inline cl_kernel ocl_pick_kernel(ggml_ocl_backend * b,
+                                        const char *        src_f32,
+                                        const char *        fn_f32,
+                                        const char *        fn_f16,
+                                        bool                use_f16) {
+    if (!use_f16) {
+        return b->kmgr->get(src_f32, fn_f32);
+    }
+    const char * slash = strrchr(src_f32, '/');
+    GGML_ASSERT(slash != nullptr && "src_f32 must be a <dir>/<file> path");
+    char src_f16[128];
+    snprintf(src_f16, sizeof(src_f16), "%.*s/%s", (int) (slash - src_f32), src_f32, fn_f16);
+    return b->kmgr->get(src_f16, fn_f16);
+}

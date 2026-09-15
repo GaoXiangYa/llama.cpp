@@ -14,7 +14,8 @@ static bool get_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op
 }
 
 static bool get_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
-    cl_kernel k = b->kmgr->get("get_rows/get_rows", "get_rows_f32_i32_f32");
+    const bool f16 = ocl_f16_packed(src0);
+    cl_kernel k = ocl_pick_kernel(b, "get_rows/get_rows", "get_rows_f32_i32_f32", "get_rows_f16_i32_f16", f16);
     if (k == nullptr) {
         return false;
     }
@@ -32,9 +33,9 @@ static bool get_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const g
 
     GGML_TENSOR_BINARY_OP_LOCALS;
 
-    cl_ulong offset0 = e0->offset + src0->view_offs;
-    cl_ulong offset1 = e1->offset + src1->view_offs;
-    cl_ulong offsetd = ed->offset + dst->view_offs;
+    cl_ulong offset0 = ocl_dev_offset(src0, e0);
+    cl_ulong offset1 = ocl_dev_offset(src1, e1);
+    cl_ulong offsetd = ocl_dev_offset(dst, ed);
 
     int nblk0 = ne0 / ggml_blck_size(dst->type);
 
@@ -51,15 +52,15 @@ static bool get_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const g
     call.arg_u64(offset1);
     call.arg_cl_mem(ed->data_device);
     call.arg_u64(offsetd);
-    call.arg_u64(nb01);
-    call.arg_u64(nb02);
-    call.arg_u64(nb03);
-    call.arg_u64(nb11);
-    call.arg_u64(nb12);
-    call.arg_u64(nb13);
-    call.arg_u64(nb1);
-    call.arg_u64(nb2);
-    call.arg_u64(nb3);
+    call.arg_u64(ocl_nb64(src0, nb01));
+    call.arg_u64(ocl_nb64(src0, nb02));
+    call.arg_u64(ocl_nb64(src0, nb03));
+    call.arg_u64(ocl_nb64(src1, nb11));
+    call.arg_u64(ocl_nb64(src1, nb12));
+    call.arg_u64(ocl_nb64(src1, nb13));
+    call.arg_u64(ocl_nb64(dst,  nb1));
+    call.arg_u64(ocl_nb64(dst,  nb2));
+    call.arg_u64(ocl_nb64(dst,  nb3));
     call.arg_i32(nblk0);
 
     call.enqueue(b);
