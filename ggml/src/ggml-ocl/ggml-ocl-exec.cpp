@@ -26,7 +26,15 @@ void ocl_kernel_call::enqueue(ggml_ocl_backend * backend, cl_event * evt_out) {
         OCL_CHECK(clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_START, sizeof(start), &start, nullptr));
         OCL_CHECK(clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_END,   sizeof(end),   &end,   nullptr));
         clReleaseEvent(evt);
-        backend->stats.record(op_name ? op_name : "?", "?", (cl_ulong)(end - start));
+
+        // 取真实函数名, 否则汇总里只能看到 "?" (按 (op, kernel) 分组, 才能定位到具体 kernel)
+        char   kname[128] = { 0 };
+        size_t kname_len  = 0;
+        if (clGetKernelInfo(kernel, CL_KERNEL_FUNCTION_NAME,
+                            sizeof(kname) - 1, kname, &kname_len) != CL_SUCCESS || kname[0] == 0) {
+            snprintf(kname, sizeof(kname), "?");
+        }
+        backend->stats.record(op_name ? op_name : "?", kname, (cl_ulong)(end - start));
         if (evt_out) {
             *evt_out = nullptr;
         }
