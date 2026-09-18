@@ -288,6 +288,17 @@ void ocl_kernel_mgr::compile_all(ggml_ocl_backend * backend) {
             char fn_name[128] = { 0 };
             clGetKernelInfo(entry.kernels[i], CL_KERNEL_FUNCTION_NAME, sizeof(fn_name) - 1, fn_name, nullptr);
             entry.kernel_index[fn_name] = (int) i;
+
+            // private_mem > 0 说明寄存器装不下, 溢出的部分落到 private memory (在 GPU 上走 global)。
+            // wg_limit 是编译器按寄存器/local 用量算出的最大 work-group 大小。
+            cl_ulong private_mem = 0;
+            size_t   wg_limit    = 0;
+            clGetKernelWorkGroupInfo(entry.kernels[i], caps->device, CL_KERNEL_PRIVATE_MEM_SIZE,
+                                     sizeof(private_mem), &private_mem, nullptr);
+            clGetKernelWorkGroupInfo(entry.kernels[i], caps->device, CL_KERNEL_WORK_GROUP_SIZE,
+                                     sizeof(wg_limit), &wg_limit, nullptr);
+            GGML_LOG_INFO("ggml-ocl: kernel %-28s private_mem %6llu B  wg_limit %zu\n",
+                          fn_name, (unsigned long long) private_mem, wg_limit);
         }
 
         entry.program        = program;

@@ -3,6 +3,7 @@
 #include "ggml-ocl-internal.h"
 #include "ggml.h"
 
+#include <CL/cl.h>
 #include <CL/cl_platform.h>
 
 namespace ops {
@@ -449,11 +450,87 @@ static bool gemm_f16_f32_run(ggml_ocl_backend *  b,
     return true;
 }
 
+static bool gemm_q4_1_f16_run(ggml_ocl_backend *  b,
+                              const ggml_tensor * src0,
+                              const ggml_tensor * src1,
+                              ggml_tensor *       dst) {
+    cl_kernel k = b->kmgr->get("mul_mat/gemm_q4_1_f16", "gemm_q4_1_f16");
+    if (k == nullptr) {
+        GGML_LOG_ERROR("cannot find gemm_q4_1_f16 kernel!\n");
+        return false;
+    }
+
+    GGML_TENSOR_BINARY_OP_LOCALS;
+    ocl_kernel_call call;
+    call.kernel  = k;
+    call.op_name = "MUL_MAT";
+    call.ndims   = 3;
+
+    constexpr int nth = 256;
+    call.local[0]     = nth;
+    call.local[1]     = 1;
+    call.local[2]     = 1;
+
+    // tile 必须和 .cl 里的 #define BM/BN 一致, 否则静默算错
+    constexpr int bm = 16;  // token 方向
+    constexpr int bn = 64;  // neuron 方向
+
+    const int num_wg_m   = (ne1 + bm - 1) / bm;
+    const int num_wg_n   = (ne0 + bn - 1) / bn;
+    const int num_groups = num_wg_m * num_wg_n;
+    call.global[0]           = num_groups * nth;
+    call.global[1]           = ne2;
+    call.global[2]           = ne3;
+
+    ggml_ocl_tensor_extra * e0 = (ggml_ocl_tensor_extra *) src0->extra;
+    ggml_ocl_tensor_extra * e1 = (ggml_ocl_tensor_extra *) src1->extra;
+    ggml_ocl_tensor_extra * ed = (ggml_ocl_tensor_extra *) dst->extra;
+
+    cl_ulong offset0 = ocl_dev_offset(src0, e0);
+    cl_ulong offset1 = ocl_dev_offset(src1, e1);
+    cl_ulong offsetd = ocl_dev_offset(dst,  ed);
+
+    call.arg_cl_mem(e0->data_device);
+    call.arg_u64(offset0);
+    call.arg_cl_mem(e1->data_device);
+    call.arg_u64(offset1);
+    call.arg_cl_mem(ed->data_device);
+    call.arg_u64(offsetd);
+    call.arg_i32(ne00);
+    call.arg_i32(ne01);
+    call.arg_i32(ne02);
+    call.arg_i32(ne03);
+    call.arg_i32(ocl_nb(src0, nb00));
+    call.arg_i32(ocl_nb(src0, nb01));
+    call.arg_i32(ocl_nb(src0, nb02));
+    call.arg_i32(ocl_nb(src0, nb03));
+    call.arg_i32(ne10);
+    call.arg_i32(ne11);
+    call.arg_i32(ne12);
+    call.arg_i32(ne13);
+    call.arg_i32(ocl_nb(src1, nb10));
+    call.arg_i32(ocl_nb(src1, nb11));
+    call.arg_i32(ocl_nb(src1, nb12));
+    call.arg_i32(ocl_nb(src1, nb13));
+    call.arg_i32(ne0);
+    call.arg_i32(ne1);
+    call.arg_i32(ne2);
+    call.arg_i32(ne3);
+    call.arg_i32(ocl_nb(dst, nb0));
+    call.arg_i32(ocl_nb(dst, nb1));
+    call.arg_i32(ocl_nb(dst, nb2));
+    call.arg_i32(ocl_nb(dst, nb3));
+    call.arg_i32(num_wg_n);
+
+    call.enqueue(b);
+    return true;
+}
+
 static bool gemm_q4_1_f32_run(ggml_ocl_backend *  b,
                               const ggml_tensor * src0,
                               const ggml_tensor * src1,
                               ggml_tensor *       dst) {
-    cl_kernel k = mul_mat_kernel(b, "mul_mat/gemm_q4_1_f32", "gemm_q4_1_f32", "gemm_q4_1_f16", src1);
+    cl_kernel k = b->kmgr->get("mul_mat/gemm_q4_1_f32", "gemm_q4_1_f32");
     if (k == nullptr) {
         GGML_LOG_ERROR("cannot find gemm_q4_1_f32 kernel!\n");
         return false;
@@ -536,6 +613,9 @@ static bool mul_mat_run(ggml_ocl_backend * b, const ggml_tensor * src0, const gg
     }
     // gemm
     if (src0->type == GGML_TYPE_Q4_1) {
+        if (ocl_f16_packed(src1)) {
+            return gemm_q4_1_f16_run(b, src0, src1, dst);
+        }
         return gemm_q4_1_f32_run(b, src0, src1, dst);
     }
     if (src0->type == GGML_TYPE_F16) {

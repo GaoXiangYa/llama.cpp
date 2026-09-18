@@ -1,106 +1,124 @@
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-#define BM 4
-#define BN 64
-#define BK 32
-#define BK_HALF 16
-#define BLOCK_SIZE 20
 
-// fp16 存储: 权重仍是 Q4_1, 激活与输出在设备上是 half
-kernel void gemm_q4_1_f16(
-        global uchar* src0, ulong offset0,
-        global char* src1, ulong offset1,
-        global char* dst, ulong offsetd,
-        int ne00, int ne01, int ne02, int ne03,
-        int nb00, int nb01, int nb02, int nb03,
-        int ne10, int ne11, int ne12, int ne13,
-        int nb10, int nb11, int nb12, int nb13,
-        int ne0, int ne1, int ne2, int ne3,
-        int nb0, int nb1, int nb2, int nb3,
-        int num_groups
-) {
+#define BM         16
+#define BN         64
+#define BK         32
+#define TM         4
+#define BK_HALF    16
+#define A_STRIDE   20
+#define B_STRIDE   BK
+
+#if (BN != 64)
+#error "gemm_q4_1_f16: 64 个 lane 全铺在 neuron 方向, BN 必须等于 64"
+#endif
+#if (BM != 4 * TM)
+#error "gemm_q4_1_f16: 行组数 = 4 个 wavefront, BM 必须等于 4 * TM"
+#endif
+
+kernel void gemm_q4_1_f16(global uchar * src0, ulong offset0,
+                          global char * src1, ulong offset1,
+                          global char * dst, ulong offsetd,
+                          int ne00, int ne01, int ne02, int ne03,
+                          int nb00, int nb01, int nb02, int nb03,
+                          int ne10, int ne11, int ne12, int ne13,
+                          int nb10, int nb11, int nb12, int nb13,
+                          int ne0, int ne1, int ne2, int ne3,
+                          int nb0, int nb1, int nb2, int nb3,
+                          int num_groups) {
     src0 = src0 + offset0;
     src1 = src1 + offset1;
-    dst = dst + offsetd;
+    dst  = dst + offsetd;
 
-    const int i0 = get_group_id(0);
-    const int i1 = get_group_id(1);
-    const int i2 = get_group_id(2);
-
+    const int i0  = get_group_id(0);
+    const int i1  = get_group_id(1);
+    const int i2  = get_group_id(2);
     const int i11 = i1;
     const int i12 = i2;
-
     const int i01 = i1 / (ne12 / ne02);
     const int i02 = i2 / (ne13 / ne03);
 
-    const int lid      = get_local_id(0);
-    const int warp_id  = lid >> 6;      // 0..3
-    const int lane_id  = lid & 63;      // 0..63
-    const int warp_row = warp_id >> 1;
-    const int warp_col = warp_id & 1;
-    const int lane_row = lane_id >> 5;
-    const int lane_col = lane_id & 31;
+    const int lid     = get_local_id(0);
+    const int nth     = (int) get_local_size(0);
+    const int warp_id = lid >> 6;   // 0..3 -> token 行组
+    const int lane_id = lid & 63;   // 0..63 -> neuron 列
 
-    local uchar lA[BN * BK_HALF];
-    local half  lB[BM * BK];
+    const int local_row_st = warp_id * TM;
+    const int local_col_st = lane_id;
 
-    const int group_row = i0 / num_groups;
-    const int group_col = i0 % num_groups;
-    const int local_row = (warp_row << 1) + lane_row;
-    const int local_col = (warp_col << 5) + lane_col;
-    const int global_row = group_row * BM + local_row;
-    const int global_col = group_col * BN + local_col;
+    const int group_row     = i0 / num_groups;
+    const int group_col     = i0 % num_groups;
+    const int global_row_st = group_row * BM + local_row_st;
+    const int global_col_st = group_col * BN + local_col_st;
 
-    float d_frag = 0.0f;
-    float m_frag = 0.0f;
+    local uchar lA[BN * A_STRIDE];
+    local half  lB[BM * B_STRIDE];
+    local half  lDM[BN * 2];
 
-    float acc = 0.0f;
+    const int seg_per_row = nth / BN;
+    const int ld_row      = lid / seg_per_row;
+    const int ld_seg      = lid % seg_per_row;
+
+    float acc0 = 0.0f;
+    float acc1 = 0.0f;
+    float acc2 = 0.0f;
+    float acc3 = 0.0f;
 
     for (int k = 0; k < ne00; k += BK) {
-        // load src0 to local memory
-        const int global_a_row = global_col;
-
-        if (global_a_row < ne01) {
-            const int blk_col = k >> 5;
-            global uchar* a_block_per_row = src0 + global_a_row * nb01 + i01 * nb02 + i02 * nb03;
-            global uchar* blk = a_block_per_row + blk_col * nb00;
-            half d = vload_half(0, (const half*) blk);       // scale
-            half m = vload_half(1, (const half*) blk);       // min
-            d_frag = (float) d;
-            m_frag = (float) m;
-            if (local_row == 0) {
-                global uchar* qs = (global uchar*)(blk + 4);
-                for (int i = 0; i < BK_HALF; ++ i) {
-                    lA[local_col * BK_HALF + i] = qs[i];
+        {
+            const int a_row = group_col * BN + ld_row;
+            if (a_row < ne01) {
+                const global uchar * blk = src0 + a_row * nb01 + i01 * nb02 + i02 * nb03 + (k >> 5) * nb00;
+                if (ld_seg == 0) {
+                    lDM[ld_row * 2 + 0] = vload_half(0, (const global half *) blk);
+                    lDM[ld_row * 2 + 1] = vload_half(1, (const global half *) blk);
                 }
+                vstore4(vload4(0, blk + 4 + ld_seg * 4), 0, lA + ld_row * A_STRIDE + ld_seg * 4);
+            } else {
+                if (ld_seg == 0) {
+                    lDM[ld_row * 2 + 0] = (half) 0.0f;
+                    lDM[ld_row * 2 + 1] = (half) 0.0f;
+                }
+                vstore4((uchar4) (0, 0, 0, 0), 0, lA + ld_row * A_STRIDE + ld_seg * 4);
             }
         }
 
-        const int global_b_row = global_row;
-        const int global_b_col = k + local_col;
-        if (local_col < BK) {
-            if (global_b_row < ne11 && global_b_col < ne10) {
-                lB[local_row * BK + local_col] = *(global half*)(src1 + global_b_col * nb10 + global_b_row * nb11 + i11 * nb12 + i12 * nb13);
-            } else {
-                lB[local_row * BK + local_col] = (half) 0.0f;
+        // 激活: BM x BK 个 half, 全 256 线程分摊
+        for (int idx = lid; idx < BM * BK; idx += nth) {
+            const int row   = idx / BK;
+            const int col   = idx % BK;
+            const int b_row = group_row * BM + row;
+            const int b_col = k + col;
+            half      v     = (half) 0.0f;
+            if (b_row < ne11 && b_col < ne10) {
+                v = *(const global half *) (src1 + b_col * nb10 + b_row * nb11 + i11 * nb12 + i12 * nb13);
             }
+            lB[row * B_STRIDE + col] = v;
         }
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        float sum0 = 0.0f;
-        float sum1 = 0.0f;
-        for (int ik = 0; ik < BK; ++ ik) {
-            uchar packed = lA[local_col * BK_HALF + (ik & (BK_HALF - 1))];
-            float q = (float)(ik < BK_HALF ? (packed & 0x0F) : (packed >> 4));
-            float b = convert_float(lB[local_row * BK + ik]);
-            sum0 += q * b;
-            sum1 += b;
+        const int   fa = local_col_st * A_STRIDE;
+        const int   fb = local_row_st * B_STRIDE;
+        const float dd = (float) lDM[local_col_st * 2 + 0];
+        const float mm = (float) lDM[local_col_st * 2 + 1];
+
+        for (int ik = 0; ik < BK; ++ik) {
+            const uchar packed = lA[fa + (ik & (BK_HALF - 1))];
+            const float q = dd * (float) (ik < BK_HALF ? (packed & 0x0F) : (packed >> 4)) + mm;
+
+            acc0 += q * convert_float(lB[fb + 0 * B_STRIDE + ik]);
+            acc1 += q * convert_float(lB[fb + 1 * B_STRIDE + ik]);
+            acc2 += q * convert_float(lB[fb + 2 * B_STRIDE + ik]);
+            acc3 += q * convert_float(lB[fb + 3 * B_STRIDE + ik]);
         }
-        acc += (d_frag * sum0 + m_frag * sum1);
         barrier(CLK_LOCAL_MEM_FENCE);
     }
-    
-    if (global_col < ne0 && global_row < ne1) {
-        *(global half*)(dst + global_col * nb0 + global_row * nb1 + i1 * nb2 + i2 * nb3) = convert_half(acc);
+
+    if (global_col_st < ne0) {
+        global char * dbase = dst + global_col_st * nb0 + i1 * nb2 + i2 * nb3;
+        if (global_row_st + 0 < ne1) { *(global half *) (dbase + (global_row_st + 0) * nb1) = convert_half(acc0); }
+        if (global_row_st + 1 < ne1) { *(global half *) (dbase + (global_row_st + 1) * nb1) = convert_half(acc1); }
+        if (global_row_st + 2 < ne1) { *(global half *) (dbase + (global_row_st + 2) * nb1) = convert_half(acc2); }
+        if (global_row_st + 3 < ne1) { *(global half *) (dbase + (global_row_st + 3) * nb1) = convert_half(acc3); }
     }
 }

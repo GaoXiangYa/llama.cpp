@@ -44,25 +44,9 @@ typedef ggml_tensor * (*ocl_op_build_fn)(ggml_context * ctx, ggml_cgraph * graph
 // 自定义叶子填充 (默认: F32 随机 [-1,1]; 需要 I32/I64 等输入时用例提供)
 using ocl_op_fill_fn = std::function<void(ggml_tensor * t, uint32_t seed)>;
 
-inline std::vector<float> ocl_op_eval(ggml_backend_t backend, ocl_op_build_fn build,
-                                      void * userdata, uint32_t seed,
-                                      const ocl_op_fill_fn & fill = nullptr) {
-    ggml_init_params params = {
-        /*.mem_size   =*/ 512 * 1024,
-        /*.mem_buffer =*/ nullptr,
-        /*.no_alloc   =*/ true,
-    };
-    ggml_context * ctx = ggml_init(params);
-    GGML_ASSERT(ctx != nullptr);
-
-    ggml_cgraph * graph = ggml_new_graph(ctx);
-    ggml_tensor * out = build(ctx, graph, userdata);
-    GGML_ASSERT(out != nullptr);
-    GGML_ASSERT((out->type == GGML_TYPE_F32 || out->type == GGML_TYPE_F16) && "only f32/f16 outputs supported");
-
-    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, backend);
-    GGML_ASSERT(buf != nullptr);
-
+// 按 seed 填充 ctx 里的叶子张量; ocl_op_eval 与 ocl_op_bench 共用
+inline void ocl_op_fill_ctx(ggml_context * ctx, ggml_backend_t backend, uint32_t seed,
+                            const ocl_op_fill_fn & fill) {
     uint32_t t_idx = 0;
     for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != nullptr; t = ggml_get_next_tensor(ctx, t)) {
         if (t->op != GGML_OP_NONE || t->view_src != nullptr) {
@@ -83,6 +67,28 @@ inline std::vector<float> ocl_op_eval(ggml_backend_t backend, ocl_op_build_fn bu
         }
         ggml_backend_tensor_set(t, data.data(), 0, ggml_nbytes(t));
     }
+}
+
+inline std::vector<float> ocl_op_eval(ggml_backend_t backend, ocl_op_build_fn build,
+                                      void * userdata, uint32_t seed,
+                                      const ocl_op_fill_fn & fill = nullptr) {
+    ggml_init_params params = {
+        /*.mem_size   =*/ 512 * 1024,
+        /*.mem_buffer =*/ nullptr,
+        /*.no_alloc   =*/ true,
+    };
+    ggml_context * ctx = ggml_init(params);
+    GGML_ASSERT(ctx != nullptr);
+
+    ggml_cgraph * graph = ggml_new_graph(ctx);
+    ggml_tensor * out = build(ctx, graph, userdata);
+    GGML_ASSERT(out != nullptr);
+    GGML_ASSERT((out->type == GGML_TYPE_F32 || out->type == GGML_TYPE_F16) && "only f32/f16 outputs supported");
+
+    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, backend);
+    GGML_ASSERT(buf != nullptr);
+
+    ocl_op_fill_ctx(ctx, backend, seed, fill);
 
     GGML_ASSERT(ggml_backend_graph_compute(backend, graph) == GGML_STATUS_SUCCESS);
     ggml_backend_synchronize(backend);
@@ -101,6 +107,47 @@ inline std::vector<float> ocl_op_eval(ggml_backend_t backend, ocl_op_build_fn bu
     ggml_backend_buffer_free(buf);
     ggml_free(ctx);
     return res;
+}
+
+// 计时: 同一张图重复执行, 返回每次执行的毫秒数。与 ocl_op_eval 的区别是分配与
+// 上传只做一次, 所以量到的主要是 kernel 时间 (host 提交开销也在里面)。
+inline double ocl_op_bench(ggml_backend_t backend, ocl_op_build_fn build, void * userdata,
+                           uint32_t seed, const ocl_op_fill_fn & fill,
+                           int warmup, int iters) {
+    ggml_init_params params = {
+        /*.mem_size   =*/ 512 * 1024,
+        /*.mem_buffer =*/ nullptr,
+        /*.no_alloc   =*/ true,
+    };
+    ggml_context * ctx = ggml_init(params);
+    GGML_ASSERT(ctx != nullptr);
+
+    ggml_cgraph * graph = ggml_new_graph(ctx);
+    ggml_tensor * out = build(ctx, graph, userdata);
+    GGML_ASSERT(out != nullptr);
+
+    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, backend);
+    GGML_ASSERT(buf != nullptr);
+
+    ocl_op_fill_ctx(ctx, backend, seed, fill);
+
+    for (int i = 0; i < warmup; i++) {
+        GGML_ASSERT(ggml_backend_graph_compute(backend, graph) == GGML_STATUS_SUCCESS);
+    }
+    ggml_backend_synchronize(backend);
+
+    const int64_t t0 = ggml_time_us();
+    for (int i = 0; i < iters; i++) {
+        GGML_ASSERT(ggml_backend_graph_compute(backend, graph) == GGML_STATUS_SUCCESS);
+    }
+    ggml_backend_synchronize(backend);
+    const int64_t t1 = ggml_time_us();
+
+    ggml_backend_buffer_free(buf);
+    ggml_free(ctx);
+
+    GGML_ASSERT(iters > 0);
+    return (double) (t1 - t0) / 1000.0 / (double) iters;
 }
 
 inline bool ocl_op_compare(const std::vector<float> & gpu, const std::vector<float> & cpu,

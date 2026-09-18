@@ -423,3 +423,59 @@ OCL_OP_TEST(gemm_f16_gqa) {
     }
     return all_ok;
 }
+
+// ---------------------------------------------------------------------------
+// N sweep: 判别 gemm_q4_1 的"权重重读"到底走不走 DRAM
+//
+//   BM=16 的 tile 每换一个 token 块就把整个权重矩阵重读一遍, 所以:
+//     模型A (重读全走 DRAM): time ∝ ceil(N/16), N=16 -> 32 时间翻倍
+//     模型B (重读被 L2 吸收): time ∝ N,          N=16 -> 32 涨幅远小于翻倍
+//   A_fit = ms / A_pred, B_fit = ms / B_pred; 哪个拟合值恒定就是哪个模型。
+//   W 小的 shape 之间对比 W 大的 shape, 就能看出 L2 起没起作用。
+//
+// 用来判断还有多少优化空间: 如果 A_fit 恒定, 时间就是权重重读的带宽账单;
+// 如果 B_fit 恒定, 重读被 L2 兜住了, 优化方向该转到内层指令数。
+// ---------------------------------------------------------------------------
+OCL_OP_TEST(gemm_perf_q4_1) {
+    struct perf_case {
+        int64_t     k, n, max_tokens;
+        const char *tag;
+    };
+    const perf_case cases[] = {
+        { 1024,   2048, 512, "W=1.3MB (可能整块进 L2)" },
+        { 1024, 151936,  32, "W=97MB (肯定进不了 L2)" },
+    };
+    const int64_t tokens[] = { 4, 8, 16, 32, 64, 128, 256, 512 };
+    printf("  kernel gemm_q4_1_f16: BM=16 x BN=64, TM=4, TN=1\n");
+
+    for (const perf_case & c : cases) {
+        printf("\n  -- K=%lld M=%lld  %s --\n", (long long) c.k, (long long) c.n, c.tag);
+        printf("      N   ms/iter   us/token    A_pred    A_fit    B_pred    B_fit\n");
+
+        for (int64_t N : tokens) {
+            if (N > c.max_tokens) {
+                continue;
+            }
+            mm_shape       s = { c.k, c.n, N };
+            ocl_op_fill_fn fill;
+            make_fill_q4_1(fill);
+
+            // 流量模型: 权重 W 重读 ceil(N/BM) 次 + 激活 (按 neuron 块重读) + 输出写回
+            const double w   = (double) ggml_row_size(GGML_TYPE_Q4_1, c.k) * (double) c.n;
+            const double act = (double) N * (double) c.k * 2.0 * ((double) c.n / 64.0);
+            const double out = (double) N * (double) c.n * 2.0;
+
+            const double t_a = w * (double) ((N + 3) / 4) + act + out;  // 模型A: BM=4 重读
+            const double t_b = w + act + out;                           // 模型B: 只读一遍
+
+            const double ms  = ocl_op_bench(backend_ocl, build_gemm_q4_1, &s, seed, fill, 2, 10);
+            const double p_a = t_a / 42.7e9 * 1e3;
+            const double p_b = t_b / 42.7e9 * 1e3;
+
+            printf("  %5lld  %8.3f  %9.3f   %7.3f   %5.2f   %7.3f   %5.2f\n",
+                   (long long) N, ms, ms * 1e3 / (double) N, p_a, ms / p_a, p_b, ms / p_b);
+        }
+    }
+    printf("\n");
+    return true;
+}
