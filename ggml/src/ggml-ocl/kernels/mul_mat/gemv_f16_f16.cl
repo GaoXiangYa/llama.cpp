@@ -54,7 +54,7 @@ kernel void gemv_f16_f16(const global char * src0,
     const int warp_size = get_sub_group_size();
     const int warp_id   = get_sub_group_id();
     const int lane_id   = get_sub_group_local_id();
-    const int row_base  = (i0 * get_num_sub_groups() + warp_id) << 4;
+    const int row_base  = (i0 * get_num_sub_groups() + warp_id) << 2;
     if (row_base >= ne01) {
         return;
     }
