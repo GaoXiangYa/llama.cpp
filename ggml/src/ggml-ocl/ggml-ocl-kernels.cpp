@@ -235,7 +235,7 @@ static std::string ocl_kernel_compile_opts(const ggml_ocl_caps * caps, ocl_kerne
 void ocl_kernel_mgr::compile_all(ggml_ocl_backend * backend) {
     std::lock_guard<std::mutex> lock(m_);
     if (!entries_.empty()) {
-        return;  // 幂等: 进程内只编译一次
+        return;
     }
 
     const ggml_ocl_caps * caps = &backend->caps;
@@ -289,8 +289,6 @@ void ocl_kernel_mgr::compile_all(ggml_ocl_backend * backend) {
             clGetKernelInfo(entry.kernels[i], CL_KERNEL_FUNCTION_NAME, sizeof(fn_name) - 1, fn_name, nullptr);
             entry.kernel_index[fn_name] = (int) i;
 
-            // private_mem > 0 说明寄存器装不下, 溢出的部分落到 private memory (在 GPU 上走 global)。
-            // wg_limit 是编译器按寄存器/local 用量算出的最大 work-group 大小。
             cl_ulong private_mem = 0;
             size_t   wg_limit    = 0;
             clGetKernelWorkGroupInfo(entry.kernels[i], caps->device, CL_KERNEL_PRIVATE_MEM_SIZE,
@@ -314,9 +312,6 @@ void ocl_kernel_mgr::compile_all(ggml_ocl_backend * backend) {
 cl_kernel ocl_kernel_mgr::get(const char * src_id, const char * fn_name) {
     auto it = entries_.find(src_id);
     if (it == entries_.end()) {
-        // 源码没被编译过。最常见的成因: 加了 .cl 和 CMakeLists 条目, 却忘了往
-        // g_kernel_defs 里加, 于是这个源从头到尾不存在。以前这里是静默返回,
-        // 排查起来只能靠猜。
         GGML_LOG_ERROR("ggml-ocl: kernel source '%s' was never compiled (missing from g_kernel_defs?)\n", src_id);
         return nullptr;
     }

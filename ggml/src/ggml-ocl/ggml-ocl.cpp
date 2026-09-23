@@ -13,9 +13,6 @@
 
 extern struct ggml_backend_device_i ggml_ocl_device_interface;
 
-// ---------------------------------------------------------------------------
-// device probing (DESIGN.md section 11.2)
-// ---------------------------------------------------------------------------
 
 static std::vector<ggml_backend_device> g_ggml_ocl_devices;
 static std::vector<std::unique_ptr<ggml_ocl_device_context>> g_ggml_ocl_dev_ctxs;
@@ -168,15 +165,14 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
         dev_ctx->max_alloc = max_alloc;
         dev_ctx->alignment = align_bits > 0 ? align_bits / 8 : 128;
 
-        // fp16 存储: F32 张量在设备上以 half 存放。开关必须在权重上传前定下来,
-        // 且进程内唯一 (多设备混用不同存储精度不在此支持)。
         {
             char ext[4096] = {0};
             clGetDeviceInfo(d.id, CL_DEVICE_EXTENSIONS, sizeof(ext), ext, nullptr);
             const bool has_fp16 = strstr(ext, "cl_khr_fp16") != nullptr;
 
-            const char * env  = getenv("GGML_OCL_FP16");
-            const bool   want = env != nullptr && env[0] != 0 && atoi(env) != 0;
+            // const char * env  = getenv("GGML_OCL_FP16");
+            const bool want = true; //default inference type is fp16
+            // const bool   want = env != nullptr && env[0] != 0 && atoi(env) != 0;
 
             if (want && !has_fp16) {
                 GGML_LOG_ERROR("ggml-ocl: GGML_OCL_FP16=1 but device has no cl_khr_fp16, disabled.\n");
@@ -185,7 +181,6 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
             GGML_LOG_INFO("ggml-ocl: fp16 storage: %s\n", ggml_ocl_fp16_storage() ? "on" : "off");
         }
 
-        // 权重加载阶段 backend 尚未创建，需要一个设备级 copy queue 上传权重
         cl_int qerr = CL_SUCCESS;
         dev_ctx->q_load = clCreateCommandQueueWithProperties(shared_context, d.id, nullptr, &qerr);
         OCL_CHECK(qerr);
@@ -316,11 +311,9 @@ static void ggml_ocl_check_node_nan(ggml_backend_t backend, ggml_tensor * node) 
     }
 }
 
-// M0: 空骨架 - 过滤视图类节点, 其余跳过 (supports_op 全 false, 不应有计算节点到达)
 static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_cgraph * cgraph) {
     ggml_ocl_backend * b = (ggml_ocl_backend *) backend->context;
 
-    // 等待 H2D 上传完成 (set_tensor 记录的事件)
     ocl_exec_wait_pending_copies(b);
 
     for (int i = 0; i < cgraph->n_nodes; i++) {
@@ -346,7 +339,6 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
         bool ok = ocl_op_dispatch(b, node);
         GGML_ASSERT(ok && "unsupported op in graph (supports_op should have filtered it)");
 
-        // 调试模式: 每个节点后同步并检查 NaN，定位最先出错的算子
         ggml_ocl_check_node_nan(backend, node);
     }
 
@@ -391,8 +383,6 @@ static void ggml_ocl_device_get_memory(ggml_backend_dev_t dev, size_t * free, si
     ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) dev->context;
 
     *total = dev_ctx->global_mem_size;
-    // 记账值 (DESIGN.md 16.5); multi-buffer 拆分由 ggml-alloc 处理
-    // 模型加载阶段 backend 可能还没创建，所以统一使用 dev_ctx->mem_allocated
     *free = *total > dev_ctx->mem_allocated ? *total - dev_ctx->mem_allocated : 0;
 }
 
@@ -436,8 +426,6 @@ static ggml_backend_t ggml_ocl_device_init(ggml_backend_dev_t dev, const char * 
             return err;
         }
 
-        // OpenCL 1.2 驱动可能只完整支持旧的 clCreateCommandQueue。
-        // 新 API 失败时回退到旧 API，这样 CL_QUEUE_PROFILING_ENABLE 仍可用。
         cl_int err_old = CL_SUCCESS;
         cl_command_queue q_old = clCreateCommandQueue(b->context, dev_ctx->device, props, &err_old);
         if (err_old == CL_SUCCESS) {
@@ -513,9 +501,7 @@ static bool ggml_ocl_device_supports_op(ggml_backend_dev_t dev, const struct ggm
         default:
             break;
     }
-    // 计算类 op 查注册表 (S8+)
-    // 注意: 模型加载阶段 dev_ctx->backend 可能还是 nullptr，但此时
-    // scheduler 仍需要 supports_op() 来判断权重能否放进 OCL buffer。
+
     ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) dev->context;
     return ocl_op_supports(dev_ctx->backend ? &dev_ctx->backend->caps : nullptr, op);
 }

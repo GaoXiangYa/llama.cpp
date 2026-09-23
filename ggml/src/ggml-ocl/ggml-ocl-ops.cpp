@@ -46,8 +46,6 @@ bool ocl_op_dispatch(ggml_ocl_backend * b, ggml_tensor * node) {
     return false;
 }
 
-// 调试: GGML_OCL_DISABLE_OPS=MUL_MAT,ROPE,GLU
-// 让指定 op 强制走 CPU，用于定位是哪个算子算错。
 static bool ggml_ocl_debug_op_disabled(enum ggml_op op) {
     const char * env = getenv("GGML_OCL_DISABLE_OPS");
     if (env == nullptr || env[0] == 0) {
@@ -64,7 +62,6 @@ static bool ggml_ocl_debug_op_disabled(enum ggml_op op) {
             end = list.size();
         }
         std::string item = list.substr(pos, end - pos);
-        // 去掉首尾空格
         size_t b = item.find_first_not_of(" \t");
         size_t e = item.find_last_not_of(" \t");
         if (b != std::string::npos) {
@@ -80,16 +77,10 @@ static bool ggml_ocl_debug_op_disabled(enum ggml_op op) {
     return false;
 }
 
-// fp16 存储模式下只有已经适配 half 存放的 op 能留在设备上。
-// 其余回退 CPU: 边界拷贝走 buffer 的 get/set, 那里会做 half <-> float 转换。
-// 每适配一个 op 就在这里加一个 case。
-//
-// 注意: 这个回退只对 scheduler 分配的张量有效。预分配张量 (KV cache) 不能被
-// 搬走, ggml-backend.cpp:930 会直接 abort, 所以碰它们的 op 必须在这里返回 true。
 static bool ggml_ocl_fp16_op_ready(enum ggml_op op) {
     switch (op) {
-        case GGML_OP_MUL_MAT:   // 权重 + 激活
-        case GGML_OP_SET_ROWS:  // KV cache 写入 (预分配, 必须支持)
+        case GGML_OP_MUL_MAT:
+        case GGML_OP_SET_ROWS:
         case GGML_OP_RMS_NORM:
         case GGML_OP_ADD:
         case GGML_OP_MUL:

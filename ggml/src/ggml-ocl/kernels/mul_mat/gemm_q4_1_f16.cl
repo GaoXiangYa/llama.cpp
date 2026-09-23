@@ -79,11 +79,11 @@ kernel void gemm_q4_1_f16(global uchar * src0,
     const int ld_row      = lid / seg_per_row;
     const int ld_seg      = lid % seg_per_row;
 
-    half acc0 = 0.0f;
-    half acc1 = 0.0f;
-    half acc2 = 0.0f;
-    half acc3 = 0.0f;
-    uchar4 tmp = (uchar4)(0, 0, 0, 0);
+    half   acc0 = 0.0f;
+    half   acc1 = 0.0f;
+    half   acc2 = 0.0f;
+    half   acc3 = 0.0f;
+    uchar4 tmp  = (uchar4) (0, 0, 0, 0);
 
     for (int k = 0; k < ne00; k += BK) {
         {
@@ -119,14 +119,14 @@ kernel void gemm_q4_1_f16(global uchar * src0,
         }
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        const int   fa = local_col_st * A_STRIDE;
-        const int   fb = local_row_st * B_STRIDE;
+        const int  fa = local_col_st * A_STRIDE;
+        const int  fb = local_row_st * B_STRIDE;
         const half dd = lDM[local_col_st * 2 + 0];
         const half mm = lDM[local_col_st * 2 + 1];
 
         for (int ik = 0; ik < BK; ++ik) {
             const uchar packed = lA[fa + (ik & (BK_HALF - 1))];
-            const half q      = dd * (ik < BK_HALF ? (packed & 0x0F) : (packed >> 4)) + mm;
+            const half  q      = dd * (ik < BK_HALF ? (packed & 0x0F) : (packed >> 4)) + mm;
 
             acc0 += q * lB[fb + 0 * B_STRIDE + ik];
             acc1 += q * lB[fb + 1 * B_STRIDE + ik];
