@@ -22,7 +22,8 @@ bool gemv_f16_f16_run(ggml_ocl_backend *  b,
     call.local[2]     = 1;
 
     constexpr int subgroup_size  = 64;
-    constexpr int rows_per_group = nth / subgroup_size;
+    constexpr int rows_per_subgroup = 4;
+    constexpr int rows_per_group = nth * rows_per_subgroup / subgroup_size;
     const int     num_groups     = (ne0 + rows_per_group - 1) / rows_per_group;
     call.global[0]               = num_groups * nth;
     call.global[1]               = ne2;
@@ -32,9 +33,14 @@ bool gemv_f16_f16_run(ggml_ocl_backend *  b,
     ggml_ocl_tensor_extra * e1 = (ggml_ocl_tensor_extra *) src1->extra;
     ggml_ocl_tensor_extra * ed = (ggml_ocl_tensor_extra *) dst->extra;
 
+    // printf("gemv shape: [%d, %d, %d]\n", ne0, ne1, ne00)
+
     cl_ulong offset0 = ocl_dev_offset(src0, e0);
     cl_ulong offset1 = ocl_dev_offset(src1, e1);
     cl_ulong offsetd = ocl_dev_offset(dst, ed);
+
+    const int gqa_kv = ne12 / ne02;
+    const int gqa_b = ne13 / ne03;
 
     call.arg_cl_mem(e0->data_device);
     call.arg_u64(offset0);
@@ -66,6 +72,9 @@ bool gemv_f16_f16_run(ggml_ocl_backend *  b,
     call.arg_i32(ocl_nb(dst, nb1));
     call.arg_i32(ocl_nb(dst, nb2));
     call.arg_i32(ocl_nb(dst, nb3));
+
+    call.arg_i32(gqa_kv);
+    call.arg_i32(gqa_b);
 
     call.enqueue(b);
     return true;
