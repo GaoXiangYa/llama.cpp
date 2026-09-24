@@ -39,7 +39,7 @@ kernel void gemv_q4_1_f16(const global char * src0,
                           int                 blks_per_row) {
     src0 = src0 + offset0;
     src1 = src1 + offset1;
-    dst  = dst + offsetd;
+    dst  = dst  + offsetd;
 
     const int i0 = get_group_id(0);
     const int i1 = get_group_id(1);
@@ -48,8 +48,12 @@ kernel void gemv_q4_1_f16(const global char * src0,
     const int i11 = i1;
     const int i12 = i2;
 
-    const int i01 = i1 / (ne12 / ne02);
-    const int i02 = i2 / (ne13 / ne03);
+    local int l_src0_off;
+    if (get_local_id(0) == 0) {
+        l_src0_off = (i1 / (ne12 / ne02)) * nb02 + (i2 / (ne13 / ne03)) * nb03;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    const int src0_off = l_src0_off;
 
     const int warp_size = get_sub_group_size();
     const int warp_id   = get_sub_group_id();
@@ -60,15 +64,15 @@ kernel void gemv_q4_1_f16(const global char * src0,
     }
 
     const int row0 = g_row;
-    const int row1 = g_row + 1;
-    const int row2 = g_row + 2;
+    const int row1 = min(g_row + 1, ne01 - 1);
+    const int row2 = min(g_row + 2, ne01 - 1);
 
-    const global uchar * src0_row0 = (const global uchar *) (src0 + row0 * nb01 + i01 * nb02 + i02 * nb03);
-    const global uchar * src0_row1 = (const global uchar *) (src0 + row1 * nb01 + i01 * nb02 + i02 * nb03);
-    const global uchar * src0_row2 = (const global uchar *) (src0 + row2 * nb01 + i01 * nb02 + i02 * nb03);
+    const global uchar * src0_row0 = (const global uchar *) (src0 + row0 * nb01 + src0_off);
+    const global uchar * src0_row1 = (const global uchar *) (src0 + row1 * nb01 + src0_off);
+    const global uchar * src0_row2 = (const global uchar *) (src0 + row2 * nb01 + src0_off);
 
     const global half * src1_ptr = (const global half *) (src1 + i11 * nb12 + i12 * nb13);
-    global half *       dst_ptr  = (global half *) (dst + i1 * nb2 + i2 * nb3);
+    global half *       dst_ptr  = (global half *)       (dst  + i1  * nb2  + i2  * nb3);
 
     const int qs_total    = blks_per_row * QS4_1;
     const int qs_per_lane = qs_total / warp_size;
@@ -89,20 +93,19 @@ kernel void gemv_q4_1_f16(const global char * src0,
 
         const global half * x = src1_ptr + blk * QK4_1;
 
-        const half2 dm0 = *((const half2 *) b0);
-        const half2 dm1 = *((const half2 *) b1);
-        const half2 dm2 = *((const half2 *) b2);
+        const half2 dm0 = *((const global half2 *) b0);
+        const half2 dm1 = *((const global half2 *) b1);
+        const half2 dm2 = *((const global half2 *) b2);
 
         half  s    = 0.0;
         half2 acc0 = (half2) (0.0, 0.0);
         half2 acc1 = (half2) (0.0, 0.0);
         half2 acc2 = (half2) (0.0, 0.0);
 
-        const int     chunk = min(QS4_1 - boff, i_end - i);
-        const half2   xs    = (0.0, 0.0);
-        global uint * w0    = (const global uint *) (&b0[4 + boff]);
-        global uint * w1    = (const global uint *) (&b1[4 + boff]);
-        global uint * w2    = (const global uint *) (&b2[4 + boff]);
+        const int           chunk = min(QS4_1 - boff, i_end - i);
+        global const uint * w0    = (const global uint *) (&b0[4 + boff]);
+        global const uint * w1    = (const global uint *) (&b1[4 + boff]);
+        global const uint * w2    = (const global uint *) (&b2[4 + boff]);
 
         for (int j = 0; j < (chunk >> 2); ++j) {
             const uint ww0 = w0[j];
@@ -111,7 +114,7 @@ kernel void gemv_q4_1_f16(const global char * src0,
 #pragma unroll
             for (int q = 0; q < 4; ++q) {
                 const int   k  = (j << 2) + q;
-                const half2 xs = (half2) (x[boff + k], x[boff + QS4_1 + k]);  // 只取一次
+                const half2 xs = (half2) (x[boff + k], x[boff + QS4_1 + k]);  // 3 行共用, 只取一次
                 s += xs.x;                                                    // 只加一次
                 s += xs.y;
 
@@ -137,13 +140,13 @@ kernel void gemv_q4_1_f16(const global char * src0,
         i += chunk;
     }
 
-    sum0 = sub_group_reduce_add(sum0);
-    sum1 = sub_group_reduce_add(sum1);
-    sum2 = sub_group_reduce_add(sum2);
+    const float2 s01 = (float2) ((float)sum0, (float)sum1);
+    const float2 r01 = sub_group_reduce_add(s01, false, false);
+    const half   r2  = sub_group_reduce_add(sum2);
 
     if (lane_id == 0) {
-        dst_ptr[row0] = sum0;
-        dst_ptr[row1] = sum1;
-        dst_ptr[row2] = sum2;
+        if (row0 < ne01) { dst_ptr[row0] = (half) r01.s0; }
+        if (row1 < ne01) { dst_ptr[row1] = (half) r01.s1; }
+        if (row2 < ne01) { dst_ptr[row2] = r2; }
     }
 }
