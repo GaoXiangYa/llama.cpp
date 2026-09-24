@@ -55,7 +55,6 @@ kernel void gemv_q4_1_f16(const global char * src0,
     barrier(CLK_LOCAL_MEM_FENCE);
     const int src0_off = l_src0_off;
 
-    const int warp_size = get_sub_group_size();
     const int warp_id   = get_sub_group_id();
     const int lane_id   = get_sub_group_local_id();
     const int g_row     = (i0 * get_num_sub_groups() + warp_id) * 3;
@@ -75,7 +74,7 @@ kernel void gemv_q4_1_f16(const global char * src0,
     global half *       dst_ptr  = (global half *)       (dst  + i1  * nb2  + i2  * nb3);
 
     const int qs_total    = blks_per_row * QS4_1;
-    const int qs_per_lane = qs_total / warp_size;
+    const int qs_per_lane = qs_total >> 6;
     int       i           = lane_id * qs_per_lane;
     const int i_end       = i + qs_per_lane;
 
