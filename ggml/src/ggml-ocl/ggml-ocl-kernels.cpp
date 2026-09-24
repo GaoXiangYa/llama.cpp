@@ -11,6 +11,7 @@ struct ocl_kernel_def {
 
 static const ocl_kernel_def g_kernel_defs[] = {
     { "add/add",               OCL_KERNEL_GENERIC },
+    { "cpy/cpy",               OCL_KERNEL_GENERIC },
     { "set_rows/set_rows",     OCL_KERNEL_GENERIC },
     { "get_rows/get_rows",     OCL_KERNEL_GENERIC },
     { "mul_mat/gemv_f32_f32",  OCL_KERNEL_GENERIC },
@@ -45,6 +46,12 @@ static const std::string & ocl_kernel_source(const char * src_id) {
     if (strcmp(src_id, "add/add") == 0) {
         static const std::string src{
 #include "add/add.cl.h"
+        };
+        return src;
+    }
+    if (strcmp(src_id, "cpy/cpy") == 0) {
+        static const std::string src{
+#include "cpy/cpy.cl.h"
         };
         return src;
     }

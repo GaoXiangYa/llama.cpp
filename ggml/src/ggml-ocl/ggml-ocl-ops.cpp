@@ -1,4 +1,5 @@
 #include "ggml-ocl-internal.h"
+#include "ggml.h"
 
 #include <cstdlib>
 #include <string>
@@ -12,11 +13,12 @@ extern const ocl_op ocl_ops_op_rmsnorm[];
 extern const ocl_op ocl_ops_op_glu[];
 extern const ocl_op ocl_ops_op_mul[];
 extern const ocl_op ocl_ops_op_rope[];
+extern const ocl_op ocl_ops_op_cpy[];
 
-static const ocl_op * g_op_groups[] = {
-    ocl_ops_op_add,     ocl_ops_op_set_rows, ocl_ops_op_get_rows, ocl_ops_op_mul_mat, ocl_ops_op_softmax,
-    ocl_ops_op_rmsnorm, ocl_ops_op_glu,      ocl_ops_op_mul,      ocl_ops_op_rope,
-};
+static const ocl_op * g_op_groups[] = { ocl_ops_op_add,     ocl_ops_op_set_rows, ocl_ops_op_get_rows,
+                                        ocl_ops_op_mul_mat, ocl_ops_op_softmax,  ocl_ops_op_rmsnorm,
+                                        ocl_ops_op_glu,     ocl_ops_op_mul,      ocl_ops_op_rope,
+                                        ocl_ops_op_cpy };
 
 bool ocl_op_dispatch(ggml_ocl_backend * b, ggml_tensor * node) {
     for (const ocl_op * group : g_op_groups) {
@@ -82,6 +84,9 @@ static bool ggml_ocl_fp16_op_ready(enum ggml_op op) {
         case GGML_OP_SOFT_MAX:
         case GGML_OP_GET_ROWS:
         case GGML_OP_ROPE:
+        case GGML_OP_CONT:
+        case GGML_OP_CPY:
+        case GGML_OP_DUP:
             return true;
         default:
             return false;

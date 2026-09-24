@@ -11,6 +11,7 @@ ggml_add_backend_library(${TARGET_NAME}
                          ggml-ocl-exec.cpp
                          ggml-ocl-ops.cpp
                          ops/add.cpp
+                         ops/cpy.cpp
                          ops/set_rows.cpp
                          ops/get_rows.cpp
                          ops/mul_mat/mul_mat.cpp
@@ -80,6 +81,7 @@ endfunction()
 # 首批 kernel: add (S5 起按需扩充; 全部 .cl 源必须在启动期编译, 变体数量收敛)
 set(GGML_OCL_KERNELS
     add/add
+    cpy/cpy
     set_rows/set_rows
     get_rows/get_rows
     mul_mat/gemv_f32_f32
