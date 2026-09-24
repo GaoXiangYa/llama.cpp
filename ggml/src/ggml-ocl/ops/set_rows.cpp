@@ -18,7 +18,6 @@ static bool set_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op
     if (dst_type != GGML_TYPE_F32 && dst_type != GGML_TYPE_F16) {
         return false;
     }
-    // kernel 里索引按 global long 读, 只对 I64 正确; I32 需要单独的变体
     if (op->src[1]->type != GGML_TYPE_I64) {
         return false;
     }
@@ -26,8 +25,6 @@ static bool set_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op
 }
 
 static bool set_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
-    // fp16 存储下 packed 的 F32 在显存里就是 half, 所以设备上的有效类型是
-    // F16 或 packed F32 -> half, 其余 F32 -> float。四种组合共用现有 kernel。
     const bool src_half = ocl_f16_packed(src0) || src0->type == GGML_TYPE_F16;
     const bool dst_half = ocl_f16_packed(dst)  || dst->type  == GGML_TYPE_F16;
 
@@ -42,7 +39,6 @@ static bool set_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const g
         kernel_name = "set_rows_f32_i64_f32";
     }
 
-    // 拆出去的三个各自成源: set_rows/<函数名>.cl; 纯 f32 那个还在 set_rows/set_rows.cl
     cl_kernel k = ocl_pick_kernel(b, "set_rows/set_rows", "set_rows_f32_i64_f32", kernel_name,
                                   strcmp(kernel_name, "set_rows_f32_i64_f32") != 0);
     if (k == nullptr) {
@@ -58,8 +54,6 @@ static bool set_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const g
     call.op_name   = "SET_ROWS";
     call.ndims     = 3;
 
-    constexpr int nth = 256;
-
     GGML_TENSOR_BINARY_OP_LOCALS;
     
     cl_ulong offset0 = ocl_dev_offset(src0, e0);
@@ -67,6 +61,7 @@ static bool set_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const g
     cl_ulong offsetd = ocl_dev_offset(dst,  ed);
 
     int nblk0 = ne0 / ggml_blck_size(dst->type);
+    const int nth = nblk0 >= 256 ? 256 : (nblk0 >= 128 ? 128 : (nblk0 >= 64 ? 64 : 32));
 
     call.global[0] = (size_t) ne01 * nth;
     call.global[1] = (size_t) ne02;
@@ -83,6 +78,8 @@ static bool set_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const g
     call.arg_u64(offsetd);
     call.arg_i32(ne00);
     call.arg_i32(ne01);
+    call.arg_i32(ne02);
+    call.arg_i32(ne03);
     call.arg_u64(ocl_nb64(src0, nb00));
     call.arg_u64(ocl_nb64(src0, nb01));
     call.arg_u64(ocl_nb64(src0, nb02));
