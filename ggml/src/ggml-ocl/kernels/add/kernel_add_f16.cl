@@ -29,15 +29,15 @@ kernel void kernel_add_f16(
     global char * src0_ptr = src0 + i03*nb03 + i02*nb02 + i01*nb01;
     global char * src1_ptr = src1 + i13*nb13 + i12*nb12 + i11*nb11;
     global char * dst_ptr  = dst  + i03*nb3  + i02*nb2  + i01*nb1;
-    const int nevec = ne0 >> 2;
+    const int nevec = ne0 >> 3;
     for (int iv = lid; iv < nevec; iv += lsz) {
-        const int i0  = iv << 2;
+        const int i0  = iv << 3;
         const int i10 = i0 % ne10;
-        const half4 a = vload4(0, (global const half *)(src0_ptr + i0 * nb00));
-        const half4 b = vload4(0, (global const half *)(src1_ptr + i10 * nb10));
-        vstore4(a + b, 0, (global half *)(dst_ptr + i0 * nb0));
+        const half8 a = vload8(0, (global const half *)(src0_ptr + i0 * nb00));
+        const half8 b = vload8(0, (global const half *)(src1_ptr + i10 * nb10));
+        vstore8(a + b, 0, (global half *)(dst_ptr + i0 * nb0));
     }
-    for (int i0 = (nevec << 2) + lid; i0 < ne0; i0 += lsz) {
+    for (int i0 = (nevec << 3) + lid; i0 < ne0; i0 += lsz) {
         const int i10 = i0 % ne10;
         const half a = *(global const half *)(src0_ptr + i0 * nb00);
         const half b = *(global const half *)(src1_ptr + i10 * nb10);

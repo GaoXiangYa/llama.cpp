@@ -20,18 +20,28 @@ kernel void mul_f16(
     const int i02 = get_group_id(1);
     const int i01 = get_group_id(0);
 
-    const int i13 = i03 % ne13;
-    const int i12 = i02 % ne12;
-    const int i11 = i01 % ne11;
+    const int lid = get_local_id(0);
+    const int lsz = get_local_size(0);
+
+    const int i13 = (ne03 != ne13) ? i03 % ne13 : i03;
+    const int i12 = (ne02 != ne12) ? i02 % ne12 : i02;
+    const int i11 = (ne01 != ne11) ? i01 % ne11 : i01;
 
     global char * src0_ptr = src0 + i03*nb03 + i02*nb02 + i01*nb01;
     global char * src1_ptr = src1 + i13*nb13 + i12*nb12 + i11*nb11;
     global char * dst_ptr  = dst  + i03*nb3  + i02*nb2  + i01*nb1;
-
-    for (int i0 = get_local_id(0); i0 < ne0; i0 += get_local_size(0)) {
+    const int nevec = ne0 >> 3;
+    for (int iv = lid; iv < nevec; iv += lsz) {
+        const int i0  = iv << 3;
         const int i10 = i0 % ne10;
-        const float v = convert_float(*((global half *)(src0_ptr + i0*nb00))) *
-                        convert_float(*((global half *)(src1_ptr + i10*nb10)));
-        *((global half *)(dst_ptr + i0*nb0)) = convert_half(v);
+        const half8 a = vload8(0, (global const half *)(src0_ptr + i0 * nb00));
+        const half8 b = vload8(0, (global const half *)(src1_ptr + i10 * nb10));
+        vstore8(a * b, 0, (global half *)(dst_ptr + i0 * nb0));
+    }
+    for (int i0 = (nevec << 3) + lid; i0 < ne0; i0 += lsz) {
+        const int i10 = i0 % ne10;
+        const half a = *(global const half *)(src0_ptr + i0 * nb00);
+        const half b = *(global const half *)(src1_ptr + i10 * nb10);
+        *(global half *)(dst_ptr + i0 * nb0) = a * b;
     }
 }
