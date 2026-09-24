@@ -18,7 +18,6 @@ inline float group_reduce_add(float val, local float* sdata) {
     return val;
 }
 
-// fp16 存储: src0/dst 在设备上都是 half, 归约仍然全 f32
 kernel void rmsnorm_f16(global char * src0,
                         ulong         offset0,
                         global char * dst,

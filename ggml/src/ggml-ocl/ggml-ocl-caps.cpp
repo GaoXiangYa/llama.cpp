@@ -18,13 +18,11 @@ static bool ocl_ext_has(const char * ext, const char * name) {
     return ext != nullptr && strstr(ext, name) != nullptr;
 }
 
-// 自研 GPU 代际识别: 命名规则待硬件团队提供, 当前返回 0 (未知)
 int ggml_ocl_parse_chip(const char * device_name) {
     (void) device_name;
     return 0;
 }
 
-// 自研编译器版本契约: 版本串格式待与驱动团队约定, 当前返回 -1
 static void ocl_parse_compiler_version(const char * driver_version,
                                        int * compiler_major, int * compiler_minor) {
     (void) driver_version;
@@ -99,7 +97,6 @@ void ggml_ocl_caps_probe(ggml_ocl_caps * caps) {
     caps->chip_gen = ggml_ocl_parse_chip(caps->device_name);
     ocl_parse_compiler_version(caps->driver_version, &caps->compiler_major, &caps->compiler_minor);
 
-    // 带宽无法直接查询, 使用常量 (DESIGN.md section 14.1)
     caps->dram_bandwidth_mbps = GGML_OCL_DRAM_BW_MBPS;
 }
 

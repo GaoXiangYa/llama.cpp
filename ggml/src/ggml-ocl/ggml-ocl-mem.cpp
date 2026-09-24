@@ -215,8 +215,6 @@ static void ggml_ocl_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor
     GGML_ASSERT(extra != nullptr);
     GGML_ASSERT(extra->layout == LAYOUT_AOS && "SoA-DM arrives in S6");
 
-    // fp16 存储: host 侧给的是 F32 数据, 设备上要存 half。
-    // tmp 的生命周期只到这里, 所以转换路径必须等写完再返回。
     std::vector<ggml_fp16_t> tmp;
     bool                     converted = false;
     if (ocl_f16_packed(tensor)) {
@@ -236,7 +234,6 @@ static void ggml_ocl_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor
 
     OCL_CHECK(clEnqueueWriteBuffer(ggml_ocl_buffer_copy_queue(buffer), extra->data_device, blocking,
                                    eff_offset, size, data, 0, nullptr, evt_ptr));
-    // 记录到 copy 事件列表: S8 的 graph 首节点等待; 超限强制结算防泄漏
     if (evt_ptr != nullptr) {
         backend->pending_copy_events.push_back(evt);
         if (backend->pending_copy_events.size() >= 32) {
@@ -275,12 +272,10 @@ static void ggml_ocl_buffer_memset_tensor(ggml_backend_buffer_t buffer, ggml_ten
     GGML_ASSERT(extra != nullptr);
 
     cl_command_queue q = ggml_ocl_buffer_copy_queue(buffer);
-    // 只能按 half 的字节数填, 填多了会踩到相邻张量的 slot
     cl_ulong eff_offset = ocl_dev_offset(tensor, extra) + ocl_dev_bytes(tensor, offset);
     size_t   dev_size   = ocl_dev_bytes(tensor, size);
 
     if (ocl_f16_packed(tensor) && value != 0) {
-        // 非 0 填充没有 half 上的直接语义, 目前只有 0 会走到这里
         GGML_ABORT("ggml-ocl: memset_tensor with value %u on fp16-stored F32 tensor", value);
     }
 
@@ -292,8 +287,6 @@ static void ggml_ocl_buffer_memset_tensor(ggml_backend_buffer_t buffer, ggml_ten
 }
 
 static bool ggml_ocl_buffer_cpy_tensor(ggml_backend_buffer_t buffer, const ggml_tensor * src, ggml_tensor * dst) {
-    // 仅处理同后端 (同 context) buffer 间的拷贝; 跨后端返回 false, 由 ggml get/set fallback。
-    // fp16 存储靠 get/set 做转换, 所以这条裸字节路径绝不能跨后端。
     ggml_ocl_device_context * dev_ctx = ggml_ocl_buffer_dev_ctx(buffer);
     if (src->buffer->buft->device == nullptr || src->buffer->buft->device->context != dev_ctx) {
         return false;

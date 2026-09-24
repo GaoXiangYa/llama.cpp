@@ -1,12 +1,5 @@
-// ggml-ocl backend: execution infrastructure (DESIGN.md section 17)
-// S7 范围: ocl_kernel_call 封装 + 队列工具 + profiling;
-// graph_compute 完整流程在 S8 与 ops 注册表一起落地.
-
 #include "ggml-ocl-internal.h"
 
-// ---------------------------------------------------------------------------
-// ocl_kernel_call (DESIGN.md 17.1)
-// ---------------------------------------------------------------------------
 
 void ocl_kernel_call::enqueue(ggml_ocl_backend * backend, cl_event * evt_out) {
     GGML_ASSERT(kernel != nullptr);
@@ -19,7 +12,6 @@ void ocl_kernel_call::enqueue(ggml_ocl_backend * backend, cl_event * evt_out) {
     if (backend->profiling_enabled) {
         cl_event evt = nullptr;
         OCL_CHECK(clEnqueueNDRangeKernel(backend->q_compute, kernel, ndims, nullptr, global, local, 0, nullptr, &evt));
-        // profiling 模式: 同步结算, 统计 (op 名, kernel 名, 耗时)
         OCL_CHECK(clWaitForEvents(1, &evt));
         cl_ulong start = 0;
         cl_ulong end = 0;
@@ -27,7 +19,6 @@ void ocl_kernel_call::enqueue(ggml_ocl_backend * backend, cl_event * evt_out) {
         OCL_CHECK(clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_END, sizeof(end), &end, nullptr));
         clReleaseEvent(evt);
 
-        // 取真实函数名, 否则汇总里只能看到 "?" (按 (op, kernel) 分组, 才能定位到具体 kernel)
         char   kname[128] = { 0 };
         size_t kname_len  = 0;
         if (clGetKernelInfo(kernel, CL_KERNEL_FUNCTION_NAME, sizeof(kname) - 1, kname, &kname_len) != CL_SUCCESS ||
@@ -43,10 +34,6 @@ void ocl_kernel_call::enqueue(ggml_ocl_backend * backend, cl_event * evt_out) {
 #endif
     OCL_CHECK(clEnqueueNDRangeKernel(backend->q_compute, kernel, ndims, nullptr, global, local, 0, nullptr, evt_out));
 }
-
-// ---------------------------------------------------------------------------
-// 队列工具 (DESIGN.md 17.3)
-// ---------------------------------------------------------------------------
 
 void ocl_exec_wait_pending_copies(ggml_ocl_backend * backend) {
     if (!backend->pending_copy_events.empty()) {
