@@ -3,10 +3,6 @@
 
 namespace ops {
 
-static ggml_type cpy_dev_type(const ggml_tensor * t) {
-    return ocl_f16_packed(t) ? GGML_TYPE_F16 : t->type;
-}
-
 static bool cpy_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     (void) caps;
     if (op->op != GGML_OP_CONT && op->op != GGML_OP_CPY && op->op != GGML_OP_DUP) {
@@ -19,9 +15,10 @@ static bool cpy_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
         return false;
     }
 
-    const ggml_type dt0 = cpy_dev_type(op->src[0]);
-    const ggml_type dt1 = cpy_dev_type(op);
-    if ((dt0 != GGML_TYPE_F16 && dt0 != GGML_TYPE_F32) || (dt1 != GGML_TYPE_F16 && dt1 != GGML_TYPE_F32)) {
+    // 只做 f32/f16 (设备上都是 half); 量化类型与非浮点类型走 CPU 回退
+    const ggml_type t0 = op->src[0]->type;
+    const ggml_type t1 = op->type;
+    if ((t0 != GGML_TYPE_F16 && t0 != GGML_TYPE_F32) || (t1 != GGML_TYPE_F16 && t1 != GGML_TYPE_F32)) {
         return false;
     }
 
@@ -35,13 +32,7 @@ static bool cpy_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
 static bool cpy_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
     GGML_UNUSED(s1);
 
-    const bool src_half = cpy_dev_type(s0) == GGML_TYPE_F16;
-    const bool dst_half = cpy_dev_type(dst) == GGML_TYPE_F16;
-
-    const char * fn = src_half ? (dst_half ? "cpy_f16_f16" : "cpy_f16_f32") :
-                                 (dst_half ? "cpy_f32_f16" : "cpy_f32_f32");
-
-    cl_kernel k = b->kmgr->get("cpy/cpy", fn);
+    cl_kernel k = b->kmgr->get("cpy/cpy", "cpy_f16_f16");
     if (k == nullptr) {
         return false;
     }

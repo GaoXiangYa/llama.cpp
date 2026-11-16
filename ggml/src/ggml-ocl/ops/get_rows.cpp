@@ -14,8 +14,7 @@ static bool get_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op
 }
 
 static bool get_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
-    const bool f16 = ocl_f16_packed(src0);
-    cl_kernel k = ocl_pick_kernel(b, "get_rows/get_rows", "get_rows_f32_i32_f32", "get_rows_f16_i32_f16", f16);
+    cl_kernel k = b->kmgr->get("get_rows/get_rows_f16_i32_f16", "get_rows_f16_i32_f16");
     if (k == nullptr) {
         return false;
     }

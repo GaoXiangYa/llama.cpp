@@ -2,6 +2,7 @@
 #include <CL/cl_platform.h>
 
 #include <cstdio>
+#include <cstring>
 
 namespace ops {
 static bool rope_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
@@ -98,16 +99,13 @@ static bool rope_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_te
         GGML_ASSERT(n_dims == ne00/2);
     }
 
-    // kernel 后缀由"设备上的有效元素类型"决定: F32 未打包 -> _f32; F16 真实张量
-    // 或 fp16 存储下的 F32 -> _f16 (两者在显存里都是 half, 共用同一批 kernel)
-    const char * rope_variant = (ocl_f16_packed(s0) || s0->type == GGML_TYPE_F16) ? "_f16" : "_f32";
-    const char * rope_base    = is_neox                   ? "kernel_rope_neox"   :
-                                (is_mrope && !is_vision)  ? "kernel_rope_multi"  :
-                                is_vision                 ? "kernel_rope_vision" :
-                                                            "kernel_rope_norm";
+    const char * rope_base = is_neox                   ? "kernel_rope_neox"   :
+                             (is_mrope && !is_vision)  ? "kernel_rope_multi"  :
+                             is_vision                 ? "kernel_rope_vision" :
+                                                         "kernel_rope_norm";
 
     char kernel_name[64];
-    snprintf(kernel_name, sizeof(kernel_name), "%s%s", rope_base, rope_variant);
+    snprintf(kernel_name, sizeof(kernel_name), "%s_f16", rope_base);
 
     cl_kernel kernel = b->kmgr->get("rope/rope", kernel_name);
     if (kernel == nullptr) {

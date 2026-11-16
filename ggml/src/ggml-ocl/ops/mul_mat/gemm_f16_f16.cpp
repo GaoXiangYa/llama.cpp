@@ -6,7 +6,7 @@ bool gemm_f16_f16_run(ggml_ocl_backend *  b,
                              ggml_tensor *       dst) {
     cl_kernel k = b->kmgr->get("mul_mat/gemm_f16_f16", "gemm_f16_f16");
     if (k == nullptr) {
-        GGML_LOG_ERROR("cannot find gemm_f16_f32 kernel!");
+        GGML_LOG_ERROR("cannot find gemm_f16_f16 kernel!");
         return false;
     }
 

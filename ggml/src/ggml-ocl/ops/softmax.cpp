@@ -15,8 +15,7 @@ static bool softmax_supports(const ggml_ocl_caps * caps, const ggml_tensor * op)
 
 static bool softmax_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
     (void) s1;
-    const bool f16 = ocl_f16_packed(s0);
-    cl_kernel k = ocl_pick_kernel(b, "softmax/softmax", "softmax", "softmax_f16", f16);
+    cl_kernel k = b->kmgr->get("softmax/softmax_f16", "softmax_f16");
     if (k == nullptr) {
         return false;
     }

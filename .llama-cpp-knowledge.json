@@ -1,0 +1,110 @@
+{
+  "knowledge_tree": {
+    "Model Loading": {
+      "status": "partial",
+      "functions": [
+        "gguf_init_from_file / gguf_init_from_file_ptr / gguf_init_from_callback",
+        "gguf_init_from_reader",
+        "gguf_reader::read_raw / read<std::string>",
+        "gguf_find_key / gguf_find_tensor",
+        "llama_model_loader::llama_model_loader",
+        "llama_model_loader::llama_tensor_weight",
+        "llama_model_loader::get_mapping_range",
+        "llama_model_loader::load_all_data / load_data_range",
+        "llama_model_base::load_hparams / load_tensors",
+        "llama_model_load"
+      ]
+    },
+    "Context / Batch": {
+      "status": "not_started",
+      "functions": []
+    },
+    "KV Cache": {
+      "status": "not_started",
+      "functions": []
+    },
+    "Scheduler": {
+      "status": "not_started",
+      "functions": []
+    },
+    "Graph Builder": {
+      "status": "not_started",
+      "functions": []
+    },
+    "Tensor / GGML": {
+      "status": "not_started",
+      "functions": []
+    },
+    "Backend (CUDA)": {
+      "status": "not_started",
+      "functions": []
+    },
+    "Sampling": {
+      "status": "not_started",
+      "functions": []
+    },
+    "Tokenizer": {
+      "status": "not_started",
+      "functions": []
+    },
+    "Attention": {
+      "status": "not_started",
+      "functions": []
+    },
+    "MLP / FFN": {
+      "status": "not_started",
+      "functions": []
+    },
+    "Model Abstraction (hparams / layer / graph / arch tables)": {
+      "status": "partial",
+      "functions": []
+    }
+  },
+  "analyzed_functions": [
+    {
+      "name": "gguf_init_from_reader",
+      "file": "ggml/src/gguf.cpp",
+      "status": "partial",
+      "date": "2026-10-28",
+      "summary": "GGUF 解析唯一实现：magic/version/计数、KV、张量元信息、data 段对齐、可选张量物化。"
+    },
+    {
+      "name": "gguf_reader",
+      "file": "ggml/src/gguf.cpp",
+      "status": "partial",
+      "date": "2026-10-28",
+      "summary": "回调式带边界检查的字节读取器，file/buffer/callback 三种来源统一到 chunked read_raw。"
+    },
+    {
+      "name": "llama_model_loader ctor / llama_tensor_weight",
+      "file": "src/llama-model-loader.cpp",
+      "status": "partial",
+      "date": "2026-10-28",
+      "summary": "no_alloc 元数据解析 + 每张量 (file idx, file offset) 索引，多分片合并，名称作唯一 join key。"
+    },
+    {
+      "name": "llama_model_loader::load_all_data",
+      "file": "src/llama-model-loader.cpp",
+      "status": "partial",
+      "date": "2026-10-28",
+      "summary": "mmap 零拷贝绑定 / 非 mmap 读取（host 直接读、GPU 异步分块上传）。"
+    }
+  ],
+  "sessions": [
+    {
+      "date": "2026-10-28",
+      "topic": "GGUF 文件解析全链路（格式 -> gguf.cpp 解析器 -> llama_model_loader 消费）",
+      "mode": "Navigation + Data Flow"
+    },
+    {
+      "date": "2026-10-28",
+      "topic": "GGUF 解析的优缺点评估：对齐信任、越界检查、单线程装载、字符串拷贝、布局不变量",
+      "mode": "Critique / Design Review"
+    },
+    {
+      "date": "2026-10-28",
+      "topic": "统一抽象（并集式 hparams/llama_layer/graph 签名）的缺点与改进方案",
+      "mode": "Critique / Design Review"
+    }
+  ]
+}

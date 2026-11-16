@@ -59,35 +59,36 @@ static bool mul_mat_supports(const ggml_ocl_caps * caps, const ggml_tensor * op)
     if ((op->src[0]->type != GGML_TYPE_F32 && op->src[0]->type != GGML_TYPE_Q4_1 &&
          op->src[0]->type != GGML_TYPE_F16) ||
         op->src[1]->type != GGML_TYPE_F32) {
-        GGML_LOG_ERROR("mul mat not support such type!");
+        GGML_LOG_ERROR("ggml-ocl: MUL_MAT unsupported types src0=%s src1=%s ne=[%lld %lld %lld %lld]\n",
+                       ggml_type_name(op->src[0]->type), ggml_type_name(op->src[1]->type),
+                       (long long) op->ne[0], (long long) op->ne[1], (long long) op->ne[2], (long long) op->ne[3]);
         return false;
     }
     return true;
 }
 
-// 选 kernel: (src0 类型, 单token/多token, 激活是否 fp16 存储) -> mul_mat/<kernel>.cpp
+// 选 kernel: src0 设备类型 (half / q4_1) x 单token/多token
+// F32 权重在设备上也是 half, 与 F16 共用同一个 kernel
 static bool mul_mat_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
-    const bool f16   = ocl_f16_packed(src1);
-    const bool gemv  = (dst->ne[1] == 1);
+    const bool gemv = (dst->ne[1] == 1);
 
     if (gemv) {
         switch (src0->type) {
-            case GGML_TYPE_Q4_1: return f16 ? gemv_q4_1_f16_run(b, src0, src1, dst) : gemv_q4_1_f32_run(b, src0, src1, dst);
-            case GGML_TYPE_F16:  return f16 ? gemv_f16_f16_run(b, src0, src1, dst)  : gemv_f16_f32_run(b, src0, src1, dst);
-            case GGML_TYPE_F32:  return f16 ? gemv_f32_f16_run(b, src0, src1, dst)  : gemv_f32_f32_run(b, src0, src1, dst);
+            case GGML_TYPE_Q4_1: return gemv_q4_1_f16_run(b, src0, src1, dst);
+            case GGML_TYPE_F16:
+            case GGML_TYPE_F32:  return gemv_f16_f16_run(b, src0, src1, dst);
             default: break;
         }
     } else {
         switch (src0->type) {
-            case GGML_TYPE_Q4_1: return f16 ? gemm_q4_1_f16_run(b, src0, src1, dst) : gemm_q4_1_f32_run(b, src0, src1, dst);
-            case GGML_TYPE_F16:  return f16 ? gemm_f16_f16_run(b, src0, src1, dst)  : gemm_f16_f32_run(b, src0, src1, dst);
-            case GGML_TYPE_F32:  return f16 ? gemm_f32_f16_run(b, src0, src1, dst)  : gemm_f32_f32_run(b, src0, src1, dst);
+            case GGML_TYPE_Q4_1: return gemm_q4_1_f16_run(b, src0, src1, dst);
+            case GGML_TYPE_F16:
+            case GGML_TYPE_F32:  return gemm_f16_f16_run(b, src0, src1, dst);
             default: break;
         }
     }
 
-    GGML_LOG_ERROR("ggml-ocl: MUL_MAT no kernel for src0=%s gemv=%d f16=%d\n",
-                   ggml_type_name(src0->type), (int) gemv, (int) f16);
+    GGML_LOG_ERROR("ggml-ocl: MUL_MAT no kernel for src0=%s gemv=%d\n", ggml_type_name(src0->type), (int) gemv);
     return false;
 }
 

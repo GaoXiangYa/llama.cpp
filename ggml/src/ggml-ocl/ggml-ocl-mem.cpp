@@ -1,114 +1,11 @@
 // ggml-ocl backend: memory management (DESIGN.md section 16)
-// M0 scope: pools + buffer interface (AoS direct). SoA-DM layout conversion,
-// subbuffer 池细化, 显存记账 arrive in S6.
 
 #include "ggml-ocl.h"
 #include "ggml-ocl-internal.h"
 
 // ---------------------------------------------------------------------------
-// pools (DESIGN.md 16.1)
+// extra pool: 每个 tensor 一份 extra (buffer reset 时回收复用)
 // ---------------------------------------------------------------------------
-
-void ocl_pool::init(cl_context ctx) {
-    context_ = ctx;
-}
-
-cl_mem ocl_pool::alloc(size_t size) {
-    std::lock_guard<std::mutex> lock(m_);
-    size_t bucket = 1;
-    while (bucket < size) {
-        bucket <<= 1;
-    }
-
-    auto it = free_.find(bucket);
-    if (it != free_.end() && !it->second.empty()) {
-        cl_mem mem = it->second.back();
-        it->second.pop_back();
-        return mem;
-    }
-
-    cl_int err;
-    cl_mem mem = clCreateBuffer(context_, CL_MEM_READ_WRITE, bucket, nullptr, &err);
-    if (err != CL_SUCCESS) {
-        GGML_LOG_ERROR("ggml-ocl: pool alloc %zu B failed (%d)\n", bucket, err);
-        return nullptr;
-    }
-    reserved_ += bucket;
-    high_water_ = MAX(high_water_, reserved_);
-    return mem;
-}
-
-void ocl_pool::release(cl_mem mem, size_t size) {
-    std::lock_guard<std::mutex> lock(m_);
-    size_t bucket = 1;
-    while (bucket < size) {
-        bucket <<= 1;
-    }
-    free_[bucket].push_back(mem);
-}
-
-void ocl_pool::trim() {
-    std::lock_guard<std::mutex> lock(m_);
-    if (reserved_ <= high_water_ / 2) {
-        return;
-    }
-    // release the oldest (front) entries of every bucket
-    for (auto & kv : free_) {
-        for (cl_mem mem : kv.second) {
-            clReleaseMemObject(mem);
-            reserved_ -= kv.first;
-        }
-        kv.second.clear();
-    }
-}
-
-void ocl_pool::clear() {
-    std::lock_guard<std::mutex> lock(m_);
-    for (auto & kv : free_) {
-        for (cl_mem mem : kv.second) {
-            clReleaseMemObject(mem);
-        }
-        kv.second.clear();
-    }
-    reserved_ = 0;
-    high_water_ = 0;
-}
-
-cl_mem ocl_subpool::alloc(cl_mem parent, size_t origin, size_t size) {
-    std::lock_guard<std::mutex> lock(m_);
-    auto key = std::make_pair(parent, size);
-    auto it = free_.find(key);
-    if (it != free_.end() && !it->second.empty()) {
-        cl_mem sub = it->second.back();
-        it->second.pop_back();
-        return sub;
-    }
-
-    cl_int err;
-    cl_buffer_region region = { origin, size };
-    cl_mem sub = clCreateSubBuffer(parent, CL_MEM_READ_WRITE,
-                                   CL_BUFFER_CREATE_TYPE_REGION, &region, &err);
-    if (err != CL_SUCCESS) {
-        GGML_LOG_ERROR("ggml-ocl: subbuffer alloc %zu B failed (%d)\n", size, err);
-        return nullptr;
-    }
-    return sub;
-}
-
-void ocl_subpool::release(cl_mem sub, cl_mem parent, size_t size) {
-    std::lock_guard<std::mutex> lock(m_);
-    free_[std::make_pair(parent, size)].push_back(sub);
-}
-
-void ocl_subpool::clear() {
-    std::lock_guard<std::mutex> lock(m_);
-    for (auto & kv : free_) {
-        for (cl_mem sub : kv.second) {
-            clReleaseMemObject(sub);
-        }
-    }
-    free_.clear();
-}
 
 ggml_ocl_tensor_extra * ocl_extra_pool::alloc() {
     if (!free_.empty()) {
@@ -200,8 +97,6 @@ static enum ggml_status ggml_ocl_buffer_init_tensor(ggml_backend_buffer_t buffer
         ggml_ocl_tensor_extra * extra = ctx->extras.alloc();
         extra->offset = offset;
         extra->data_device = ctx->mem;
-        extra->aux_device = nullptr;
-        extra->layout = LAYOUT_AOS;
         tensor->extra = extra;
     }
     return GGML_STATUS_SUCCESS;
@@ -213,7 +108,6 @@ static void ggml_ocl_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor
     ggml_ocl_backend *        backend  = dev_ctx->backend;
     ggml_ocl_tensor_extra *   extra    = (ggml_ocl_tensor_extra *) tensor->extra;
     GGML_ASSERT(extra != nullptr);
-    GGML_ASSERT(extra->layout == LAYOUT_AOS && "SoA-DM arrives in S6");
 
     std::vector<ggml_fp16_t> tmp;
     bool                     converted = false;
@@ -295,7 +189,6 @@ static bool ggml_ocl_buffer_cpy_tensor(ggml_backend_buffer_t buffer, const ggml_
     ggml_ocl_tensor_extra * src_extra = (ggml_ocl_tensor_extra *) src->extra;
     ggml_ocl_tensor_extra * dst_extra = (ggml_ocl_tensor_extra *) dst->extra;
     GGML_ASSERT(src_extra != nullptr && dst_extra != nullptr);
-    GGML_ASSERT(src_extra->layout == LAYOUT_AOS && dst_extra->layout == LAYOUT_AOS && "SoA-DM arrives in a later step");
     GGML_ASSERT(ocl_f16_packed(src) == ocl_f16_packed(dst) && "mixed storage in cpy_tensor");
 
     cl_command_queue q       = ggml_ocl_buffer_copy_queue(buffer);

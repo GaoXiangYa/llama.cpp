@@ -25,22 +25,7 @@ static bool set_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op
 }
 
 static bool set_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
-    const bool src_half = ocl_f16_packed(src0) || src0->type == GGML_TYPE_F16;
-    const bool dst_half = ocl_f16_packed(dst)  || dst->type  == GGML_TYPE_F16;
-
-    const char * kernel_name = nullptr;
-    if (src_half && dst_half) {
-        kernel_name = "set_rows_f16_i64_f16";
-    } else if (dst_half) {
-        kernel_name = "set_rows_f32_i64_f16";
-    } else if (src_half) {
-        kernel_name = "set_rows_f16_i64_f32";
-    } else {
-        kernel_name = "set_rows_f32_i64_f32";
-    }
-
-    cl_kernel k = ocl_pick_kernel(b, "set_rows/set_rows", "set_rows_f32_i64_f32", kernel_name,
-                                  strcmp(kernel_name, "set_rows_f32_i64_f32") != 0);
+    cl_kernel k = b->kmgr->get("set_rows/set_rows_f16_i64_f16", "set_rows_f16_i64_f16");
     if (k == nullptr) {
         return false;
     }

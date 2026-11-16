@@ -10,20 +10,7 @@ struct ocl_kernel_def {
 };
 
 static const ocl_kernel_def g_kernel_defs[] = {
-    { "add/add",               OCL_KERNEL_GENERIC },
     { "cpy/cpy",               OCL_KERNEL_GENERIC },
-    { "set_rows/set_rows",     OCL_KERNEL_GENERIC },
-    { "get_rows/get_rows",     OCL_KERNEL_GENERIC },
-    { "mul_mat/gemv_f32_f32",  OCL_KERNEL_GENERIC },
-    { "mul_mat/gemv_q4_1_f32", OCL_KERNEL_GENERIC },
-    { "mul_mat/gemm_f32_f32",  OCL_KERNEL_GENERIC },
-    { "mul_mat/gemm_q4_1_f32", OCL_KERNEL_GENERIC },
-    { "mul_mat/gemv_f16_f32",  OCL_KERNEL_GENERIC },
-    { "mul_mat/gemm_f16_f32",  OCL_KERNEL_GENERIC },
-    { "softmax/softmax",       OCL_KERNEL_GENERIC },
-    { "rmsnorm/rmsnorm",       OCL_KERNEL_GENERIC },
-    { "glu/glu",               OCL_KERNEL_GENERIC },
-    { "mul/mul",               OCL_KERNEL_GENERIC },
     { "rope/rope",             OCL_KERNEL_GENERIC },
     { "add/kernel_add_f16",                   OCL_KERNEL_GENERIC },
     { "mul/mul_f16",                          OCL_KERNEL_GENERIC },
@@ -32,98 +19,16 @@ static const ocl_kernel_def g_kernel_defs[] = {
     { "softmax/softmax_f16",                  OCL_KERNEL_GENERIC },
     { "get_rows/get_rows_f16_i32_f16",        OCL_KERNEL_GENERIC },
     { "set_rows/set_rows_f16_i64_f16",        OCL_KERNEL_GENERIC },
-    { "set_rows/set_rows_f32_i64_f16",        OCL_KERNEL_GENERIC },
-    { "set_rows/set_rows_f16_i64_f32",        OCL_KERNEL_GENERIC },
     { "mul_mat/gemv_q4_1_f16",                OCL_KERNEL_GENERIC },
-    { "mul_mat/gemv_f32_f16",                 OCL_KERNEL_GENERIC },
     { "mul_mat/gemv_f16_f16",                 OCL_KERNEL_GENERIC },
     { "mul_mat/gemm_q4_1_f16",                OCL_KERNEL_GENERIC },
-    { "mul_mat/gemm_f32_f16",                 OCL_KERNEL_GENERIC },
     { "mul_mat/gemm_f16_f16",                 OCL_KERNEL_GENERIC },
 };
 
 static const std::string & ocl_kernel_source(const char * src_id) {
-    if (strcmp(src_id, "add/add") == 0) {
-        static const std::string src{
-#include "add/add.cl.h"
-        };
-        return src;
-    }
     if (strcmp(src_id, "cpy/cpy") == 0) {
         static const std::string src{
 #include "cpy/cpy.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul/mul") == 0) {
-        static const std::string src{
-#include "mul/mul.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "set_rows/set_rows") == 0) {
-        static const std::string src{
-#include "set_rows/set_rows.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "get_rows/get_rows") == 0) {
-        static const std::string src{
-#include "get_rows/get_rows.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul_mat/gemv_f32_f32") == 0) {
-        static const std::string src{
-#include "mul_mat/gemv_f32_f32.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul_mat/gemv_q4_1_f32") == 0) {
-        static const std::string src{
-#include "mul_mat/gemv_q4_1_f32.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul_mat/gemm_f32_f32") == 0) {
-        static const std::string src{
-#include "mul_mat/gemm_f32_f32.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul_mat/gemm_q4_1_f32") == 0) {
-        static const std::string src{
-#include "mul_mat/gemm_q4_1_f32.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul_mat/gemv_f16_f32") == 0) {
-        static const std::string src{
-#include "mul_mat/gemv_f16_f32.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul_mat/gemm_f16_f32") == 0) {
-        static const std::string src{
-#include "mul_mat/gemm_f16_f32.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "softmax/softmax") == 0) {
-        static const std::string src{
-#include "softmax/softmax.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "rmsnorm/rmsnorm") == 0) {
-        static const std::string src{
-#include "rmsnorm/rmsnorm.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "glu/glu") == 0) {
-        static const std::string src{
-#include "glu/glu.cl.h"
         };
         return src;
     }
@@ -175,27 +80,9 @@ static const std::string & ocl_kernel_source(const char * src_id) {
         };
         return src;
     }
-    if (strcmp(src_id, "set_rows/set_rows_f32_i64_f16") == 0) {
-        static const std::string src{
-#include "set_rows/set_rows_f32_i64_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "set_rows/set_rows_f16_i64_f32") == 0) {
-        static const std::string src{
-#include "set_rows/set_rows_f16_i64_f32.cl.h"
-        };
-        return src;
-    }
     if (strcmp(src_id, "mul_mat/gemv_q4_1_f16") == 0) {
         static const std::string src{
 #include "mul_mat/gemv_q4_1_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul_mat/gemv_f32_f16") == 0) {
-        static const std::string src{
-#include "mul_mat/gemv_f32_f16.cl.h"
         };
         return src;
     }
@@ -208,12 +95,6 @@ static const std::string & ocl_kernel_source(const char * src_id) {
     if (strcmp(src_id, "mul_mat/gemm_q4_1_f16") == 0) {
         static const std::string src{
 #include "mul_mat/gemm_q4_1_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul_mat/gemm_f32_f16") == 0) {
-        static const std::string src{
-#include "mul_mat/gemm_f32_f16.cl.h"
         };
         return src;
     }
@@ -333,9 +214,4 @@ cl_kernel ocl_kernel_mgr::get(const char * src_id, const char * fn_name) {
         return nullptr;
     }
     return entry.kernels[fit->second];
-}
-
-bool ocl_kernel_mgr::is_ready(const char * src_id) const {
-    auto it = entries_.find(src_id);
-    return it != entries_.end() && it->second.state == KS_OK;
 }

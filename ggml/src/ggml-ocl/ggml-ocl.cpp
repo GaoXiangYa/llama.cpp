@@ -17,17 +17,6 @@ extern struct ggml_backend_device_i ggml_ocl_device_interface;
 static std::vector<ggml_backend_device> g_ggml_ocl_devices;
 static std::vector<std::unique_ptr<ggml_ocl_device_context>> g_ggml_ocl_dev_ctxs;
 
-// fp16 存储开关: 必须在权重上传之前定下来, 所以在设备探测阶段设置, 不能等到 backend init
-static bool g_ggml_ocl_fp16_storage = false;
-
-bool ggml_ocl_fp16_storage() {
-    return g_ggml_ocl_fp16_storage;
-}
-
-void ggml_ocl_fp16_storage_set(bool enable) {
-    g_ggml_ocl_fp16_storage = enable;
-}
-
 static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg * reg) {
     std::vector<ggml_backend_device> found;
 
@@ -137,9 +126,6 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
             continue;
         }
 
-        char pname[128] = {0};
-        clGetPlatformInfo(d.platform, CL_PLATFORM_NAME, sizeof(pname), pname, nullptr);
-
         size_t global_mem = 0;
         clGetDeviceInfo(d.id, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(global_mem), &global_mem, nullptr);
 
@@ -150,14 +136,10 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
         clGetDeviceInfo(d.id, CL_DEVICE_MEM_BASE_ADDR_ALIGN, sizeof(align_bits), &align_bits, nullptr);
 
         auto dev_ctx = std::unique_ptr<ggml_ocl_device_context>(new ggml_ocl_device_context{
-            /* .platform        = */ d.platform,
             /* .device          = */ d.id,
-            /* .platform_name   = */ pname,
             /* .device_name     = */ d.name,
-            /* .device_type     = */ d.type,
             /* .global_mem_size = */ global_mem,
             /* .context         = */ shared_context,
-            /* .context_refs    = */ 0,
             /* .backend         = */ nullptr,
             /* .buffer_type     = */ {},
         });
@@ -165,20 +147,14 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
         dev_ctx->max_alloc = max_alloc;
         dev_ctx->alignment = align_bits > 0 ? align_bits / 8 : 128;
 
+        // fp16 存储是固定策略: 设备不支持则跳过, 由上层回退到 CPU
         {
             char ext[4096] = {0};
             clGetDeviceInfo(d.id, CL_DEVICE_EXTENSIONS, sizeof(ext), ext, nullptr);
-            const bool has_fp16 = strstr(ext, "cl_khr_fp16") != nullptr;
-
-            // const char * env  = getenv("GGML_OCL_FP16");
-            const bool want = true; //default inference type is fp16
-            // const bool   want = env != nullptr && env[0] != 0 && atoi(env) != 0;
-
-            if (want && !has_fp16) {
-                GGML_LOG_ERROR("ggml-ocl: GGML_OCL_FP16=1 but device has no cl_khr_fp16, disabled.\n");
+            if (strstr(ext, "cl_khr_fp16") == nullptr) {
+                GGML_LOG_ERROR("ggml-ocl: device %s has no cl_khr_fp16, skipped\n", d.name);
+                continue;
             }
-            ggml_ocl_fp16_storage_set(want && has_fp16);
-            GGML_LOG_INFO("ggml-ocl: fp16 storage: %s\n", ggml_ocl_fp16_storage() ? "on" : "off");
         }
 
         cl_int qerr = CL_SUCCESS;
@@ -409,7 +385,6 @@ static ggml_backend_t ggml_ocl_device_init(ggml_backend_dev_t dev, const char * 
 
     ggml_ocl_backend * b = new ggml_ocl_backend{};
     b->caps.device = dev_ctx->device;
-    b->caps.platform = dev_ctx->platform;
     ggml_ocl_caps_probe(&b->caps);
     ggml_ocl_caps_print(&b->caps);
 
@@ -453,8 +428,6 @@ static ggml_backend_t ggml_ocl_device_init(ggml_backend_dev_t dev, const char * 
     OCL_CHECK(qerr);
     GGML_ASSERT(b->q_copy != nullptr);
 
-    b->scratch_pool.init(b->context);
-
 #ifdef GGML_OCL_PROFILING
     GGML_LOG_INFO("ggml-ocl: profiling %s\n", b->profiling_enabled ? "enabled" : "disabled (queue fallback)");
 #endif
@@ -464,7 +437,6 @@ static ggml_backend_t ggml_ocl_device_init(ggml_backend_dev_t dev, const char * 
     b->kmgr->compile_all(b);
 
     dev_ctx->backend = b;
-    dev_ctx->context_refs++;
 
     ggml_backend_t backend = new ggml_backend{
         /* .guid    = */ nullptr,

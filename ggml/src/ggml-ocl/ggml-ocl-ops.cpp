@@ -73,33 +73,8 @@ static bool ggml_ocl_debug_op_disabled(enum ggml_op op) {
     return false;
 }
 
-static bool ggml_ocl_fp16_op_ready(enum ggml_op op) {
-    switch (op) {
-        case GGML_OP_MUL_MAT:
-        case GGML_OP_SET_ROWS:
-        case GGML_OP_RMS_NORM:
-        case GGML_OP_ADD:
-        case GGML_OP_MUL:
-        case GGML_OP_GLU:
-        case GGML_OP_SOFT_MAX:
-        case GGML_OP_GET_ROWS:
-        case GGML_OP_ROPE:
-        case GGML_OP_CONT:
-        case GGML_OP_CPY:
-        case GGML_OP_DUP:
-            return true;
-        default:
-            return false;
-    }
-}
-
 bool ocl_op_supports(const ggml_ocl_caps * caps, const ggml_tensor * node) {
     if (node == nullptr) {
-        return false;
-    }
-
-    if (ggml_ocl_fp16_storage() && !ggml_ocl_fp16_op_ready(node->op)) {
-        GGML_LOG_DEBUG("ggml-ocl: %s not fp16-ready, fallback to CPU\n", ggml_op_name(node->op));
         return false;
     }
 
