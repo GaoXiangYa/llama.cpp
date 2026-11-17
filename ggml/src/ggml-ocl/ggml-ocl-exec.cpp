@@ -35,6 +35,59 @@ void ocl_kernel_call::enqueue(ggml_ocl_backend * backend, cl_event * evt_out) {
     OCL_CHECK(clEnqueueNDRangeKernel(backend->q_compute, kernel, ndims, nullptr, global, local, 0, nullptr, evt_out));
 }
 
+void ocl_pack_binary_args(ocl_kernel_call &  call,
+                          const ggml_tensor * s0,
+                          const ggml_tensor * s1,
+                          const ggml_tensor * dst,
+                          bool                strides_u64) {
+    ggml_ocl_tensor_extra * e0 = (ggml_ocl_tensor_extra *) s0->extra;
+    ggml_ocl_tensor_extra * e1 = (ggml_ocl_tensor_extra *) s1->extra;
+    ggml_ocl_tensor_extra * ed = (ggml_ocl_tensor_extra *) dst->extra;
+    GGML_ASSERT(e0 != nullptr && e1 != nullptr && ed != nullptr);
+
+    auto nb = [&](const ggml_tensor * t, size_t v) {
+        if (strides_u64) {
+            call.arg_u64(ocl_nb64(t, v));
+        } else {
+            call.arg_i32(ocl_nb(t, v));
+        }
+    };
+
+    call.arg_cl_mem(e0->data_device);
+    call.arg_u64(ocl_dev_offset(s0, e0));
+    call.arg_cl_mem(e1->data_device);
+    call.arg_u64(ocl_dev_offset(s1, e1));
+    call.arg_cl_mem(ed->data_device);
+    call.arg_u64(ocl_dev_offset(dst, ed));
+
+    call.arg_i32((cl_int) s0->ne[0]);
+    call.arg_i32((cl_int) s0->ne[1]);
+    call.arg_i32((cl_int) s0->ne[2]);
+    call.arg_i32((cl_int) s0->ne[3]);
+    nb(s0, s0->nb[0]);
+    nb(s0, s0->nb[1]);
+    nb(s0, s0->nb[2]);
+    nb(s0, s0->nb[3]);
+
+    call.arg_i32((cl_int) s1->ne[0]);
+    call.arg_i32((cl_int) s1->ne[1]);
+    call.arg_i32((cl_int) s1->ne[2]);
+    call.arg_i32((cl_int) s1->ne[3]);
+    nb(s1, s1->nb[0]);
+    nb(s1, s1->nb[1]);
+    nb(s1, s1->nb[2]);
+    nb(s1, s1->nb[3]);
+
+    call.arg_i32((cl_int) dst->ne[0]);
+    call.arg_i32((cl_int) dst->ne[1]);
+    call.arg_i32((cl_int) dst->ne[2]);
+    call.arg_i32((cl_int) dst->ne[3]);
+    nb(dst, dst->nb[0]);
+    nb(dst, dst->nb[1]);
+    nb(dst, dst->nb[2]);
+    nb(dst, dst->nb[3]);
+}
+
 void ocl_exec_wait_pending_copies(ggml_ocl_backend * backend) {
     if (!backend->pending_copy_events.empty()) {
         OCL_CHECK(clWaitForEvents(backend->pending_copy_events.size(), backend->pending_copy_events.data()));

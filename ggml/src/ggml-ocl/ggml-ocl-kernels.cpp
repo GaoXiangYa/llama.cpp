@@ -2,118 +2,17 @@
 
 #include <cstring>
 
-enum ocl_kernel_class { OCL_KERNEL_GENERIC, OCL_KERNEL_PERF };
-
-struct ocl_kernel_def {
-    const char *     src_id;
-    ocl_kernel_class cls;
+struct ocl_kernel_src {
+    const char * id;
+    const char * src;
 };
 
-static const ocl_kernel_def g_kernel_defs[] = {
-    { "cpy/cpy",               OCL_KERNEL_GENERIC },
-    { "rope/rope",             OCL_KERNEL_GENERIC },
-    { "add/kernel_add_f16",                   OCL_KERNEL_GENERIC },
-    { "mul/mul_f16",                          OCL_KERNEL_GENERIC },
-    { "glu/swiglu_f16",                       OCL_KERNEL_GENERIC },
-    { "rmsnorm/rmsnorm_f16",                  OCL_KERNEL_GENERIC },
-    { "softmax/softmax_f16",                  OCL_KERNEL_GENERIC },
-    { "get_rows/get_rows_f16_i32_f16",        OCL_KERNEL_GENERIC },
-    { "set_rows/set_rows_f16_i64_f16",        OCL_KERNEL_GENERIC },
-    { "mul_mat/gemv_q4_1_f16",                OCL_KERNEL_GENERIC },
-    { "mul_mat/gemv_f16_f16",                 OCL_KERNEL_GENERIC },
-    { "mul_mat/gemm_q4_1_f16",                OCL_KERNEL_GENERIC },
-    { "mul_mat/gemm_f16_f16",                 OCL_KERNEL_GENERIC },
-};
+// 由 CMake 根据 GGML_OCL_KERNELS 生成 (kernels/embed_kernel.py)
+#include "ocl_kernels.inc"
 
-static const std::string & ocl_kernel_source(const char * src_id) {
-    if (strcmp(src_id, "cpy/cpy") == 0) {
-        static const std::string src{
-#include "cpy/cpy.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "rope/rope") == 0) {
-        static const std::string src{
-#include "rope/rope.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "add/kernel_add_f16") == 0) {
-        static const std::string src{
-#include "add/kernel_add_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul/mul_f16") == 0) {
-        static const std::string src{
-#include "mul/mul_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "glu/swiglu_f16") == 0) {
-        static const std::string src{
-#include "glu/swiglu_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "rmsnorm/rmsnorm_f16") == 0) {
-        static const std::string src{
-#include "rmsnorm/rmsnorm_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "softmax/softmax_f16") == 0) {
-        static const std::string src{
-#include "softmax/softmax_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "get_rows/get_rows_f16_i32_f16") == 0) {
-        static const std::string src{
-#include "get_rows/get_rows_f16_i32_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "set_rows/set_rows_f16_i64_f16") == 0) {
-        static const std::string src{
-#include "set_rows/set_rows_f16_i64_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul_mat/gemv_q4_1_f16") == 0) {
-        static const std::string src{
-#include "mul_mat/gemv_q4_1_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul_mat/gemv_f16_f16") == 0) {
-        static const std::string src{
-#include "mul_mat/gemv_f16_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul_mat/gemm_q4_1_f16") == 0) {
-        static const std::string src{
-#include "mul_mat/gemm_q4_1_f16.cl.h"
-        };
-        return src;
-    }
-    if (strcmp(src_id, "mul_mat/gemm_f16_f16") == 0) {
-        static const std::string src{
-#include "mul_mat/gemm_f16_f16.cl.h"
-        };
-        return src;
-    }
-    GGML_ABORT("ggml-ocl: unknown kernel source '%s'", src_id);
-}
-
-static std::string ocl_kernel_compile_opts(const ggml_ocl_caps * caps, ocl_kernel_class cls) {
-    std::string opts = std::string("-cl-std=CL") + std::to_string(caps->ocl_c_major) + "." +
-                       std::to_string(caps->ocl_c_minor) + " -cl-mad-enable";
-    if (cls == OCL_KERNEL_PERF) {
-        opts += " -cl-fast-relaxed-math";
-    }
-    return opts;
+static std::string ocl_kernel_compile_opts(const ggml_ocl_caps * caps) {
+    return std::string("-cl-std=CL") + std::to_string(caps->ocl_c_major) + "." +
+           std::to_string(caps->ocl_c_minor) + " -cl-mad-enable";
 }
 
 // ---------------------------------------------------------------------------
@@ -130,21 +29,20 @@ void ocl_kernel_mgr::compile_all(ggml_ocl_backend * backend) {
     const int64_t         t0   = ggml_time_us();
     int                   n_ok = 0;
 
-    for (const ocl_kernel_def & def : g_kernel_defs) {
+    for (const ocl_kernel_src & def : g_kernel_srcs) {
         ocl_kernel_entry entry;
-        entry.src_id       = def.src_id;
-        entry.compile_opts = ocl_kernel_compile_opts(caps, def.cls);
+        entry.src_id       = def.id;
+        entry.compile_opts = ocl_kernel_compile_opts(caps);
 
-        const std::string & src      = ocl_kernel_source(def.src_id);
-        const char *        src_cstr = src.c_str();
-        const size_t        src_len  = src.size();
+        const char * src_cstr = def.src;
+        const size_t src_len  = strlen(def.src);
 
         cl_int     err;
         cl_program program = clCreateProgramWithSource(backend->context, 1, &src_cstr, &src_len, &err);
         if (err != CL_SUCCESS) {
-            GGML_LOG_ERROR("ggml-ocl: create program %s failed (%d)\n", def.src_id, err);
+            GGML_LOG_ERROR("ggml-ocl: create program %s failed (%d)\n", def.id, err);
             entry.state          = KS_FAILED;
-            entries_[def.src_id] = std::move(entry);
+            entries_[def.id] = std::move(entry);
             continue;
         }
 
@@ -153,20 +51,20 @@ void ocl_kernel_mgr::compile_all(ggml_ocl_backend * backend) {
             char   log[4096] = { 0 };
             size_t log_size  = 0;
             clGetProgramBuildInfo(program, caps->device, CL_PROGRAM_BUILD_LOG, sizeof(log) - 1, log, &log_size);
-            GGML_LOG_ERROR("ggml-ocl: build %s failed (%d):\n%s\n", def.src_id, err, log);
+            GGML_LOG_ERROR("ggml-ocl: build %s failed (%d):\n%s\n", def.id, err, log);
             clReleaseProgram(program);
             entry.state          = KS_FAILED;
-            entries_[def.src_id] = std::move(entry);
+            entries_[def.id] = std::move(entry);
             continue;
         }
 
         cl_uint n_kernels = 0;
         err               = clCreateKernelsInProgram(program, 0, nullptr, &n_kernels);
         if (err != CL_SUCCESS || n_kernels == 0) {
-            GGML_LOG_ERROR("ggml-ocl: no kernels found in %s (%d)\n", def.src_id, err);
+            GGML_LOG_ERROR("ggml-ocl: no kernels found in %s (%d)\n", def.id, err);
             clReleaseProgram(program);
             entry.state          = KS_FAILED;
-            entries_[def.src_id] = std::move(entry);
+            entries_[def.id] = std::move(entry);
             continue;
         }
 
@@ -189,18 +87,18 @@ void ocl_kernel_mgr::compile_all(ggml_ocl_backend * backend) {
 
         entry.program        = program;
         entry.state          = KS_OK;
-        entries_[def.src_id] = std::move(entry);
+        entries_[def.id] = std::move(entry);
         n_ok++;
     }
 
-    const int n_total = sizeof(g_kernel_defs) / sizeof(g_kernel_defs[0]);
+    const int n_total = sizeof(g_kernel_srcs) / sizeof(g_kernel_srcs[0]);
     GGML_LOG_INFO("ggml-ocl: loaded %d/%d kernel sources in %.2f s\n", n_ok, n_total, (ggml_time_us() - t0) / 1e6);
 }
 
 cl_kernel ocl_kernel_mgr::get(const char * src_id, const char * fn_name) {
     auto it = entries_.find(src_id);
     if (it == entries_.end()) {
-        GGML_LOG_ERROR("ggml-ocl: kernel source '%s' was never compiled (missing from g_kernel_defs?)\n", src_id);
+        GGML_LOG_ERROR("ggml-ocl: kernel source '%s' was never compiled (missing from GGML_OCL_KERNELS?)\n", src_id);
         return nullptr;
     }
     if (it->second.state != KS_OK) {

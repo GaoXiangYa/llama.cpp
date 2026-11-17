@@ -179,8 +179,7 @@ class ocl_extra_pool {
 // ---------------------------------------------------------------------------
 
 struct ocl_op {
-    enum ggml_op op       = GGML_OP_NONE;
-    int          unary_op = 0;  // 仅 op==GGML_OP_UNARY 时有效 (0 = 全部)
+    enum ggml_op op = GGML_OP_NONE;
     bool (*supports)(const ggml_ocl_caps * caps, const ggml_tensor * t)                                  = nullptr;
     bool (*run)(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) = nullptr;
 };
@@ -234,30 +233,35 @@ struct ocl_kernel_call {
     int     arg_idx       = 0;
 
     void arg_cl_mem(cl_mem v) {
+        GGML_ASSERT(arg_idx < 64);
         args[arg_idx].mem  = v;
         arg_sizes[arg_idx] = sizeof(cl_mem);
         arg_idx++;
     }
 
     void arg_u64(cl_ulong v) {
+        GGML_ASSERT(arg_idx < 64);
         args[arg_idx].u64  = v;
         arg_sizes[arg_idx] = sizeof(cl_ulong);
         arg_idx++;
     }
 
     void arg_i32(cl_int v) {
+        GGML_ASSERT(arg_idx < 64);
         args[arg_idx].i32  = v;
         arg_sizes[arg_idx] = sizeof(cl_int);
         arg_idx++;
     }
 
     void arg_i32x4(cl_int4 v) {
+        GGML_ASSERT(arg_idx < 64);
         args[arg_idx].i32x4 = v;
         arg_sizes[arg_idx] = sizeof(int32_t) * 4;
         arg_idx++;
     }
 
     void arg_f32(cl_float v) {
+        GGML_ASSERT(arg_idx < 64);
         args[arg_idx].f32  = v;
         arg_sizes[arg_idx] = sizeof(cl_float);
         arg_idx++;
@@ -266,6 +270,15 @@ struct ocl_kernel_call {
     // 提交到 compute 队列; profiling 开启时同步结算耗时
     void enqueue(ggml_ocl_backend * backend, cl_event * evt_out = nullptr);
 };
+
+// 二元算子的公共参数: src0,off0, src1,off1, dst,offd,
+// ne00..03, nb00..03, ne10..13, nb10..13, ne0..3, nb0..3
+// strides_u64: add/mul 的 kernel 用 ulong 步长, mul_mat 用 int
+void ocl_pack_binary_args(ocl_kernel_call &  call,
+                          const ggml_tensor * s0,
+                          const ggml_tensor * s1,
+                          const ggml_tensor * dst,
+                          bool                strides_u64);
 
 // ---------------------------------------------------------------------------
 // exec 队列工具 (DESIGN.md sections 17.2/17.3)

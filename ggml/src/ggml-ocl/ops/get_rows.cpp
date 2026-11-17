@@ -1,10 +1,11 @@
 #include "ggml-ocl-internal.h"
+#include "ops/ops.h"
 #include "ggml.h"
 
 #include <CL/cl_platform.h>
 
 namespace ops {
-static bool get_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
+bool get_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     (void) caps;
     if (op->op != GGML_OP_GET_ROWS) {
         return false;
@@ -13,7 +14,7 @@ static bool get_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op
     return op->src[0]->type == GGML_TYPE_F32;
 }
 
-static bool get_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
+bool get_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
     cl_kernel k = b->kmgr->get("get_rows/get_rows_f16_i32_f16", "get_rows_f16_i32_f16");
     if (k == nullptr) {
         return false;
@@ -67,8 +68,3 @@ static bool get_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const g
 }
 
 }  // namespace ops
-
-extern const ocl_op ocl_ops_op_get_rows[] = {
-    { GGML_OP_GET_ROWS, 0, ops::get_rows_supports, ops::get_rows_run },
-    { GGML_OP_NONE,     0, nullptr,                nullptr }, // 哨兵终止
-};

@@ -1,11 +1,12 @@
 #include "ggml-ocl-internal.h"
+#include "ops/ops.h"
 #include <CL/cl_platform.h>
 
 #include <cstdio>
 #include <cstring>
 
 namespace ops {
-static bool rope_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
+bool rope_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     (void) caps;
     if (op->op != GGML_OP_ROPE) {
         return false;
@@ -21,7 +22,7 @@ static bool rope_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     return true;
 }
 
-static bool rope_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
+bool rope_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
     ggml_ocl_tensor_extra * extra0 = (ggml_ocl_tensor_extra *)s0->extra;
     ggml_ocl_tensor_extra * extra1 = (ggml_ocl_tensor_extra *)s1->extra;
     ggml_ocl_tensor_extra * extrad = (ggml_ocl_tensor_extra *)dst->extra;
@@ -46,9 +47,6 @@ static bool rope_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_te
     const cl_ulong  nb03 = s0 ? ocl_nb64(s0, s0->nb[3]) : 0;
 
     const int ne10 = s1 ? s1->ne[0] : 0;
-    const int ne11 = s1 ? s1->ne[1] : 0; 
-    const int ne12 = s1 ? s1->ne[2] : 0; 
-    const int ne13 = s1 ? s1->ne[3] : 0;
 
     const int  ne0 = dst ? dst->ne[0] : 0;
     const int  ne1 = dst ? dst->ne[1] : 0;
@@ -178,8 +176,3 @@ static bool rope_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_te
 }
 
 }  // namespace ops
-
-extern const ocl_op ocl_ops_op_rope[] = {
-    { GGML_OP_ROPE, 0, ops::rope_supports, ops::rope_run },
-    { GGML_OP_NONE, 0, nullptr, nullptr }, // 哨兵终止
-};

@@ -1,43 +1,40 @@
 #include "ggml-ocl-internal.h"
-#include "ggml.h"
+#include "ops/ops.h"
 
 #include <cstdlib>
 #include <string>
 
-extern const ocl_op ocl_ops_op_add[];
-extern const ocl_op ocl_ops_op_set_rows[];
-extern const ocl_op ocl_ops_op_get_rows[];
-extern const ocl_op ocl_ops_op_mul_mat[];
-extern const ocl_op ocl_ops_op_softmax[];
-extern const ocl_op ocl_ops_op_rmsnorm[];
-extern const ocl_op ocl_ops_op_glu[];
-extern const ocl_op ocl_ops_op_mul[];
-extern const ocl_op ocl_ops_op_rope[];
-extern const ocl_op ocl_ops_op_cpy[];
-
-static const ocl_op * g_op_groups[] = { ocl_ops_op_add,     ocl_ops_op_set_rows, ocl_ops_op_get_rows,
-                                        ocl_ops_op_mul_mat, ocl_ops_op_softmax,  ocl_ops_op_rmsnorm,
-                                        ocl_ops_op_glu,     ocl_ops_op_mul,      ocl_ops_op_rope,
-                                        ocl_ops_op_cpy };
+// 所有 op 的唯一注册点: 新增算子只需在 ops/ 里实现并在下表加一行
+static const ocl_op g_ops[] = {
+    { GGML_OP_ADD,      ops::add_supports,      ops::add_run      },
+    { GGML_OP_MUL,      ops::mul_supports,      ops::mul_run      },
+    { GGML_OP_CONT,     ops::cpy_supports,      ops::cpy_run      },
+    { GGML_OP_CPY,      ops::cpy_supports,      ops::cpy_run      },
+    { GGML_OP_DUP,      ops::cpy_supports,      ops::cpy_run      },
+    { GGML_OP_SET_ROWS, ops::set_rows_supports, ops::set_rows_run },
+    { GGML_OP_GET_ROWS, ops::get_rows_supports, ops::get_rows_run },
+    { GGML_OP_MUL_MAT,  ops::mul_mat_supports,  ops::mul_mat_run  },
+    { GGML_OP_SOFT_MAX, ops::softmax_supports,  ops::softmax_run  },
+    { GGML_OP_RMS_NORM, ops::rmsnorm_supports,  ops::rmsnorm_run  },
+    { GGML_OP_GLU,      ops::glu_supports,      ops::glu_run      },
+    { GGML_OP_ROPE,     ops::rope_supports,     ops::rope_run     },
+};
 
 bool ocl_op_dispatch(ggml_ocl_backend * b, ggml_tensor * node) {
-    for (const ocl_op * group : g_op_groups) {
-        for (int i = 0; group[i].run != nullptr; i++) {
-            const ocl_op & o = group[i];
-            if (node->op != o.op) {
-                continue;
-            }
-            if (o.supports != nullptr && !o.supports(&b->caps, node)) {
-                continue;
-            }
-#ifdef GGML_OCL_OP_SHAPE
-            GGML_LOG_INFO("ggml-ocl: GPU op %s (src0=%s src1=%s) ne=[%lld %lld %lld %lld]\n", ggml_op_name(node->op),
-                          ggml_type_name(node->src[0]->type),
-                          ggml_type_name(node->src[1] ? node->src[1]->type : GGML_TYPE_F32), (long long) node->ne[0],
-                          (long long) node->ne[1], (long long) node->ne[2], (long long) node->ne[3]);
-#endif
-            return o.run(b, node->src[0], node->src[1], node);
+    for (const ocl_op & o : g_ops) {
+        if (node->op != o.op) {
+            continue;
         }
+        if (o.supports != nullptr && !o.supports(&b->caps, node)) {
+            continue;
+        }
+#ifdef GGML_OCL_OP_SHAPE
+        GGML_LOG_INFO("ggml-ocl: GPU op %s (src0=%s src1=%s) ne=[%lld %lld %lld %lld]\n", ggml_op_name(node->op),
+                      ggml_type_name(node->src[0]->type),
+                      ggml_type_name(node->src[1] ? node->src[1]->type : GGML_TYPE_F32), (long long) node->ne[0],
+                      (long long) node->ne[1], (long long) node->ne[2], (long long) node->ne[3]);
+#endif
+        return o.run(b, node->src[0], node->src[1], node);
     }
     return false;
 }
@@ -82,17 +79,11 @@ bool ocl_op_supports(const ggml_ocl_caps * caps, const ggml_tensor * node) {
         GGML_LOG_INFO("ggml-ocl: op %s disabled by GGML_OCL_DISABLE_OPS, fallback to CPU\n", ggml_op_name(node->op));
         return false;
     }
-    for (const ocl_op * group : g_op_groups) {
-        for (int i = 0; group[i].run != nullptr; i++) {
-            const ocl_op & o = group[i];
-            if (node->op != o.op) {
-                continue;
-            }
-            if (o.supports == nullptr) {
-                return false;
-            }
-            return o.supports(caps, node);
+    for (const ocl_op & o : g_ops) {
+        if (node->op != o.op) {
+            continue;
         }
+        return o.supports != nullptr && o.supports(caps, node);
     }
     return false;
 }

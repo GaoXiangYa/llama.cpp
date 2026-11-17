@@ -1,11 +1,12 @@
 #include "ggml-ocl-internal.h"
+#include "ops/ops.h"
 #include "ggml.h"
 #include <CL/cl_platform.h>
 
 #include <cstring>
 
 namespace ops {
-static bool set_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
+bool set_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     (void) caps;
     if (op->op != GGML_OP_SET_ROWS) {
         return false;
@@ -24,7 +25,7 @@ static bool set_rows_supports(const ggml_ocl_caps * caps, const ggml_tensor * op
     return true;
 }
 
-static bool set_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
+bool set_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
     cl_kernel k = b->kmgr->get("set_rows/set_rows_f16_i64_f16", "set_rows_f16_i64_f16");
     if (k == nullptr) {
         return false;
@@ -92,8 +93,3 @@ static bool set_rows_run(ggml_ocl_backend * b, const ggml_tensor * src0, const g
 }
 
 }  // namespace ops
-
-extern const ocl_op ocl_ops_op_set_rows[] = {
-    { GGML_OP_SET_ROWS, 0, ops::set_rows_supports, ops::set_rows_run },
-    { GGML_OP_NONE,     0, nullptr,                nullptr }, // 哨兵终止
-};

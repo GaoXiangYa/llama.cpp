@@ -1,8 +1,9 @@
 #include "ggml-ocl-internal.h"
+#include "ops/ops.h"
 #include "ggml.h"
 
 namespace ops {
-static bool glu_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
+bool glu_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     (void) caps;
     if (op->op != GGML_OP_GLU) {
         return false;
@@ -70,7 +71,7 @@ static bool swiglu_run(ggml_ocl_backend * b, const ggml_tensor* s0, const ggml_t
     return true;
 }
 
-static bool glu_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
+bool glu_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
     ggml_glu_op op;
     memcpy(&op, dst->op_params + 0, sizeof(ggml_glu_op));
     if (op != GGML_GLU_OP_SWIGLU) {
@@ -80,8 +81,3 @@ static bool glu_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_ten
 }
 
 }  // namespace ops
-
-extern const ocl_op ocl_ops_op_glu[] = {
-    { GGML_OP_GLU, 0, ops::glu_supports, ops::glu_run },
-    { GGML_OP_NONE, 0, nullptr, nullptr }, // 哨兵终止
-};

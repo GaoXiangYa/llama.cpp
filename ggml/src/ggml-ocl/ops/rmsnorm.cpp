@@ -1,8 +1,9 @@
 #include "ggml-ocl-internal.h"
+#include "ops/ops.h"
 #include "ggml.h"
 
 namespace ops {
-static bool rmsnorm_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
+bool rmsnorm_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     (void) caps;
     if (op->op != GGML_OP_RMS_NORM) {
         return false;
@@ -13,7 +14,7 @@ static bool rmsnorm_supports(const ggml_ocl_caps * caps, const ggml_tensor * op)
     return true;
 }
 
-static bool rmsnorm_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor* s1, ggml_tensor * dst) {
+bool rmsnorm_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor* s1, ggml_tensor * dst) {
     (void) s1;
     cl_kernel k = b->kmgr->get("rmsnorm/rmsnorm_f16", "rmsnorm_f16");
     if (k == nullptr) {
@@ -59,8 +60,3 @@ static bool rmsnorm_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml
 }
 
 }  // namespace ops
-
-extern const ocl_op ocl_ops_op_rmsnorm[] = {
-    { GGML_OP_RMS_NORM, 0, ops::rmsnorm_supports, ops::rmsnorm_run },
-    { GGML_OP_NONE,     0, nullptr,               nullptr          }, // 哨兵终止 (遍历依赖)
-};

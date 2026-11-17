@@ -135,14 +135,11 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
         cl_uint align_bits = 0;
         clGetDeviceInfo(d.id, CL_DEVICE_MEM_BASE_ADDR_ALIGN, sizeof(align_bits), &align_bits, nullptr);
 
-        auto dev_ctx = std::unique_ptr<ggml_ocl_device_context>(new ggml_ocl_device_context{
-            /* .device          = */ d.id,
-            /* .device_name     = */ d.name,
-            /* .global_mem_size = */ global_mem,
-            /* .context         = */ shared_context,
-            /* .backend         = */ nullptr,
-            /* .buffer_type     = */ {},
-        });
+        auto dev_ctx = std::unique_ptr<ggml_ocl_device_context>(new ggml_ocl_device_context());
+        dev_ctx->device          = d.id;
+        dev_ctx->device_name     = d.name;
+        dev_ctx->global_mem_size = global_mem;
+        dev_ctx->context         = shared_context;
 
         dev_ctx->max_alloc = max_alloc;
         dev_ctx->alignment = align_bits > 0 ? align_bits / 8 : 128;

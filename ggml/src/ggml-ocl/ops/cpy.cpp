@@ -1,9 +1,10 @@
 #include "ggml-ocl-internal.h"
+#include "ops/ops.h"
 #include "ggml.h"
 
 namespace ops {
 
-static bool cpy_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
+bool cpy_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     (void) caps;
     if (op->op != GGML_OP_CONT && op->op != GGML_OP_CPY && op->op != GGML_OP_DUP) {
         return false;
@@ -29,7 +30,7 @@ static bool cpy_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
            op->src[0]->ne[3] == op->ne[3];
 }
 
-static bool cpy_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
+bool cpy_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
     GGML_UNUSED(s1);
 
     cl_kernel k = b->kmgr->get("cpy/cpy", "cpy_f16_f16");
@@ -77,10 +78,3 @@ static bool cpy_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_ten
 }
 
 }  // namespace ops
-
-extern const ocl_op ocl_ops_op_cpy[] = {
-    { GGML_OP_CONT, 0, ops::cpy_supports, ops::cpy_run },
-    { GGML_OP_CPY,  0, ops::cpy_supports, ops::cpy_run },
-    { GGML_OP_DUP,  0, ops::cpy_supports, ops::cpy_run },
-    { GGML_OP_NONE, 0, nullptr,           nullptr      }, // 哨兵终止
-};

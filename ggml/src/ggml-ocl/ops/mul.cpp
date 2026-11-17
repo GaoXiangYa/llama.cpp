@@ -1,8 +1,8 @@
-
 #include "ggml-ocl-internal.h"
+#include "ops/ops.h"
 
 namespace ops {
-static bool mul_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
+bool mul_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     (void) caps;
     if (op->op != GGML_OP_MUL) {
         return false;
@@ -13,17 +13,13 @@ static bool mul_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     return true;
 }
 
-static bool mul_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
+bool mul_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
     cl_kernel k = b->kmgr->get("mul/mul_f16", "mul_f16");
     if (k == nullptr) {
         return false;
     }
 
-    ggml_ocl_tensor_extra * e0 = (ggml_ocl_tensor_extra *) s0->extra;
-    ggml_ocl_tensor_extra * e1 = (ggml_ocl_tensor_extra *) s1->extra;
-    ggml_ocl_tensor_extra * ed = (ggml_ocl_tensor_extra *) dst->extra;
-    GGML_ASSERT(e0 != nullptr && e1 != nullptr && ed != nullptr);
-
+    // 3D grid: 每 workgroup 处理 src0 的一行; src1 的广播在 kernel 内取模
     const unsigned int nth  = MIN(64u, (unsigned int) s0->ne[0]);
     const int          ne01 = (int) s0->ne[1];
     const int          ne02 = (int) s0->ne[2];
@@ -40,44 +36,10 @@ static bool mul_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_ten
     call.local[1]  = 1;
     call.local[2]  = 1;
 
-    call.arg_cl_mem(e0->data_device);
-    call.arg_u64(ocl_dev_offset(s0, e0));
-    call.arg_cl_mem(e1->data_device);
-    call.arg_u64(ocl_dev_offset(s1, e1));
-    call.arg_cl_mem(ed->data_device);
-    call.arg_u64(ocl_dev_offset(dst, ed));
-    call.arg_i32((cl_int) s0->ne[0]);
-    call.arg_i32(ne01);
-    call.arg_i32(ne02);
-    call.arg_i32(ne03);
-    call.arg_u64(ocl_nb64(s0, s0->nb[0]));
-    call.arg_u64(ocl_nb64(s0, s0->nb[1]));
-    call.arg_u64(ocl_nb64(s0, s0->nb[2]));
-    call.arg_u64(ocl_nb64(s0, s0->nb[3]));
-    call.arg_i32((cl_int) s1->ne[0]);
-    call.arg_i32((cl_int) s1->ne[1]);
-    call.arg_i32((cl_int) s1->ne[2]);
-    call.arg_i32((cl_int) s1->ne[3]);
-    call.arg_u64(ocl_nb64(s1, s1->nb[0]));
-    call.arg_u64(ocl_nb64(s1, s1->nb[1]));
-    call.arg_u64(ocl_nb64(s1, s1->nb[2]));
-    call.arg_u64(ocl_nb64(s1, s1->nb[3]));
-    call.arg_i32((cl_int) dst->ne[0]);
-    call.arg_i32((cl_int) dst->ne[1]);
-    call.arg_i32((cl_int) dst->ne[2]);
-    call.arg_i32((cl_int) dst->ne[3]);
-    call.arg_u64(ocl_nb64(dst, dst->nb[0]));
-    call.arg_u64(ocl_nb64(dst, dst->nb[1]));
-    call.arg_u64(ocl_nb64(dst, dst->nb[2]));
-    call.arg_u64(ocl_nb64(dst, dst->nb[3]));
+    ocl_pack_binary_args(call, s0, s1, dst, /*strides_u64=*/true);
 
     call.enqueue(b);
     return true;
 }
 
 }  // namespace ops
-
-extern const ocl_op ocl_ops_op_mul[] = {
-    { GGML_OP_MUL, 0, ops::mul_supports, ops::mul_run },
-    { GGML_OP_NONE, 0, nullptr, nullptr }, // 哨兵终止
-};

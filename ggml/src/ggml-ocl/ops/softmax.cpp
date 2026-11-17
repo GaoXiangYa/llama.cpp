@@ -1,8 +1,9 @@
 #include "ggml-ocl-internal.h"
+#include "ops/ops.h"
 #include "ggml.h"
 
 namespace ops {
-static bool softmax_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
+bool softmax_supports(const ggml_ocl_caps * caps, const ggml_tensor * op) {
     (void) caps;
     if (op->op != GGML_OP_SOFT_MAX) {
         return false;
@@ -13,7 +14,7 @@ static bool softmax_supports(const ggml_ocl_caps * caps, const ggml_tensor * op)
     return true;
 }
 
-static bool softmax_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
+bool softmax_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst) {
     (void) s1;
     cl_kernel k = b->kmgr->get("softmax/softmax_f16", "softmax_f16");
     if (k == nullptr) {
@@ -99,8 +100,3 @@ static bool softmax_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml
 }
 
 }  // namespace ops
-
-extern const ocl_op ocl_ops_op_softmax[] = {
-    { GGML_OP_SOFT_MAX, 0, ops::softmax_supports, ops::softmax_run },
-    { GGML_OP_NONE,     0, nullptr,               nullptr          }, // 哨兵终止 (遍历依赖)
-};
