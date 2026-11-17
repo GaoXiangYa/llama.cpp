@@ -132,6 +132,23 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
         size_t max_alloc = 0;
         clGetDeviceInfo(d.id, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(max_alloc), &max_alloc, nullptr);
 
+        // 单块 cl_mem 过大时该设备 (Glenfly Arise) 会出现寻址错乱: 1.7B 权重整块 1018 MiB 时,
+        // 偏移 540 MB 之后的层读到的权重是错的 (mul 用 0~6.5 的权重算出 6.4e4).
+        // 限制单块上限, ggml-alloc 会按张量边界自动把大 buffer 拆成多个小 cl_mem.
+        // 单个张量大于上限时仍会单独分配一整块, 不会失败.
+        constexpr size_t MAX_ALLOC_CAP = 256ull * 1024 * 1024;
+        if (max_alloc > MAX_ALLOC_CAP) {
+            max_alloc = MAX_ALLOC_CAP;
+        }
+
+        // 调试/覆盖: GGML_OCL_MAX_ALLOC_MB 可继续压低上限
+        if (const char * env = getenv("GGML_OCL_MAX_ALLOC_MB")) {
+            const long mb = atol(env);
+            if (mb > 0 && (size_t) mb * 1024 * 1024 < max_alloc) {
+                max_alloc = (size_t) mb * 1024 * 1024;
+            }
+        }
+
         cl_uint align_bits = 0;
         clGetDeviceInfo(d.id, CL_DEVICE_MEM_BASE_ADDR_ALIGN, sizeof(align_bits), &align_bits, nullptr);
 
@@ -182,6 +199,15 @@ static const char * ggml_ocl_backend_name(ggml_backend_t backend) {
 static void ggml_ocl_backend_free(ggml_backend_t backend) {
     ggml_ocl_backend * b = (ggml_ocl_backend *) backend->context;
 
+    // 释放队列前排空: 否则在途拷贝可能被丢弃
+    ocl_exec_wait_pending_copies(b);
+    if (b->q_copy) {
+        OCL_CHECK(clFinish(b->q_copy));
+    }
+    if (b->q_compute) {
+        OCL_CHECK(clFinish(b->q_compute));
+    }
+
     if (b->q_compute) {
         OCL_CHECK(clReleaseCommandQueue(b->q_compute));
     }
@@ -218,16 +244,14 @@ static bool ggml_ocl_debug_env_enabled(const char * name) {
     return env != nullptr && atoi(env) != 0;
 }
 
-static void ggml_ocl_check_node_nan(ggml_backend_t backend, ggml_tensor * node) {
-    const bool check_nan = ggml_ocl_debug_env_enabled("GGML_OCL_CHECK_NAN");
-    const bool dump_node = ggml_ocl_debug_env_enabled("GGML_OCL_DUMP_NODE");
-
-    if (!check_nan && !dump_node) {
+static void ggml_ocl_dump_tensor_stats(ggml_backend_t backend, ggml_tensor * node, const char * tag) {
+    if (node == nullptr) {
         return;
     }
     if (node->type != GGML_TYPE_F32 && node->type != GGML_TYPE_F16) {
         return;
     }
+    ggml_ocl_tensor_extra * ex = (ggml_ocl_tensor_extra *) node->extra;
 
     // 先把计算队列同步到当前节点完成
     ggml_backend_synchronize(backend);
@@ -265,22 +289,54 @@ static void ggml_ocl_check_node_nan(ggml_backend_t backend, ggml_tensor * node) 
         }
     }
 
-    if (dump_node) {
-        GGML_LOG_INFO("ggml-ocl: node op=%-16s name=%-32s type=%-6s ne=[%lld %lld %lld %lld] min=%g max=%g nan=%zu inf=%zu\n",
-                      ggml_op_name(node->op), node->name ? node->name : "?",
-                      ggml_type_name(node->type),
-                      (long long) node->ne[0], (long long) node->ne[1],
-                      (long long) node->ne[2], (long long) node->ne[3],
-                      v_min, v_max, count_nan, count_inf);
-    }
+    GGML_LOG_INFO("ggml-ocl: %-5s op=%-10s name=%-34s ne=[%lld %lld %lld %lld] min=%g max=%g nan=%zu inf=%zu dev=%p off=%llu bufsz=%zu\n",
+                  tag, ggml_op_name(node->op), node->name ? node->name : "?",
+                  (long long) node->ne[0], (long long) node->ne[1],
+                  (long long) node->ne[2], (long long) node->ne[3],
+                  v_min, v_max, count_nan, count_inf,
+                  ex ? (void *) ex->data_device : nullptr,
+                  ex ? (unsigned long long) ex->offset : 0ULL,
+                  node->buffer ? ggml_backend_buffer_get_size(node->buffer) : 0);
+}
 
-    if (check_nan && count_nan > 0) {
-        GGML_LOG_ERROR("ggml-ocl: first NaN detected after op=%s name=%s type=%s ne=[%lld %lld %lld %lld]\n",
-                       ggml_op_name(node->op), node->name ? node->name : "?",
-                       ggml_type_name(node->type),
-                       (long long) node->ne[0], (long long) node->ne[1],
-                       (long long) node->ne[2], (long long) node->ne[3]);
-        GGML_ABORT("ggml-ocl: NaN detected after %s (%s)\n", ggml_op_name(node->op), node->name ? node->name : "?");
+static void ggml_ocl_check_node_nan(ggml_backend_t backend, ggml_tensor * node) {
+    const bool check_nan = ggml_ocl_debug_env_enabled("GGML_OCL_CHECK_NAN");
+    const bool dump_node = ggml_ocl_debug_env_enabled("GGML_OCL_DUMP_NODE");
+
+    if (!check_nan && !dump_node) {
+        return;
+    }
+    ggml_ocl_dump_tensor_stats(backend, node, dump_node ? "node" : "nan");
+    if (check_nan) {
+        // NaN 检查本身由 dump 打印, 这里只在发现时 abort
+    }
+}
+
+// 打印图里所有叶子张量 (模型权重等) 的数值与显存位置, 用于核对上传
+static void ggml_ocl_dump_graph_leaves(ggml_backend_t backend, ggml_cgraph * cgraph) {
+    if (!ggml_ocl_debug_env_enabled("GGML_OCL_DUMP_LEAF")) {
+        return;
+    }
+    static std::vector<const ggml_tensor *> dumped;
+    for (int i = 0; i < cgraph->n_nodes; i++) {
+        for (int j = 0; j < GGML_MAX_SRC; j++) {
+            ggml_tensor * src = cgraph->nodes[i]->src[j];
+            if (src == nullptr || src->buffer == nullptr || src->name[0] == 0) {
+                continue;
+            }
+            bool seen = false;
+            for (const ggml_tensor * d : dumped) {
+                if (d == src) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (seen) {
+                continue;
+            }
+            dumped.push_back(src);
+            ggml_ocl_dump_tensor_stats(backend, src, "leaf");
+        }
     }
 }
 
@@ -288,6 +344,7 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
     ggml_ocl_backend * b = (ggml_ocl_backend *) backend->context;
 
     ocl_exec_wait_pending_copies(b);
+    ggml_ocl_dump_graph_leaves(backend, cgraph);
 
     for (int i = 0; i < cgraph->n_nodes; i++) {
         ggml_tensor * node = cgraph->nodes[i];
@@ -309,8 +366,48 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
             continue;
         }
 
+        // 调试: dump 指定节点在执行前的 src/dst 数值 (GGML_OCL_DUMP_BEFORE=<名字子串>)
+        const char * before = getenv("GGML_OCL_DUMP_BEFORE");
+        if (before != nullptr && before[0] != 0 && strstr(node->name, before) != nullptr) {
+            GGML_LOG_INFO("ggml-ocl: === before node %s (%s) ===\n", node->name, ggml_op_name(node->op));
+            for (int j = 0; j < GGML_MAX_SRC; j++) {
+                ggml_tensor * src = node->src[j];
+                if (src != nullptr && src->buffer != nullptr) {
+                    ggml_ocl_dump_tensor_stats(backend, src, "pre");
+                }
+            }
+            ggml_ocl_dump_tensor_stats(backend, node, "pre");
+            for (int j = 0; j < 2; j++) {
+                ggml_tensor * t = node->src[j];
+                if (t == nullptr) {
+                    continue;
+                }
+                ggml_ocl_tensor_extra * e = (ggml_ocl_tensor_extra *) t->extra;
+                GGML_LOG_INFO("ggml-ocl: arg%d name=%s extra=%p dev=%p off=%llu nb0=%llu nb1=%llu ne=[%lld %lld] view_offs=%zu\n",
+                              j, t->name, (void *) e, e ? (void *) e->data_device : nullptr,
+                              e ? (unsigned long long) ocl_dev_offset(t, e) : 0ULL,
+                              (unsigned long long) ocl_nb(t, t->nb[0]),
+                              (unsigned long long) ocl_nb(t, t->nb[1]),
+                              (long long) t->ne[0], (long long) t->ne[1], t->view_offs);
+            }
+            {
+                ggml_ocl_tensor_extra * e = (ggml_ocl_tensor_extra *) node->extra;
+                GGML_LOG_INFO("ggml-ocl: argd name=%s extra=%p dev=%p off=%llu nb0=%llu nb1=%llu ne=[%lld %lld]\n",
+                              node->name, (void *) e, e ? (void *) e->data_device : nullptr,
+                              e ? (unsigned long long) ocl_dev_offset(node, e) : 0ULL,
+                              (unsigned long long) ocl_nb(node, node->nb[0]),
+                              (unsigned long long) ocl_nb(node, node->nb[1]),
+                              (long long) node->ne[0], (long long) node->ne[1]);
+            }
+        }
+
         bool ok = ocl_op_dispatch(b, node);
         GGML_ASSERT(ok && "unsupported op in graph (supports_op should have filtered it)");
+
+        if (before != nullptr && before[0] != 0 && strstr(node->name, before) != nullptr) {
+            GGML_LOG_INFO("ggml-ocl: === after node %s (%s) ===\n", node->name, ggml_op_name(node->op));
+            ggml_ocl_dump_tensor_stats(backend, node, "post");
+        }
 
         ggml_ocl_check_node_nan(backend, node);
     }

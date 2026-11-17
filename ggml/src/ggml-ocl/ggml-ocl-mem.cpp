@@ -52,6 +52,14 @@ struct ggml_ocl_buffer_ctx {
     }
 };
 
+// 记录拷贝事件, graph_compute 开头统一等待 (上限 32 个)
+static void ocl_buffer_track_copy_event(ggml_ocl_backend * backend, cl_event evt) {
+    backend->pending_copy_events.push_back(evt);
+    if (backend->pending_copy_events.size() >= 32) {
+        ocl_exec_wait_pending_copies(backend);
+    }
+}
+
 static ggml_ocl_device_context * ggml_ocl_buffer_dev_ctx(ggml_backend_buffer_t buffer) {
     return (ggml_ocl_device_context *) buffer->buft->device->context;
 }
@@ -79,7 +87,8 @@ static void ggml_ocl_buffer_free_buffer(ggml_backend_buffer_t buffer) {
 }
 
 static void * ggml_ocl_buffer_get_base(ggml_backend_buffer_t buffer) {
-    // fake base for offset arithmetic; tensor->data = base + offset
+    // 必须是 alignment 对齐的假地址: ggml_tallocr_new 用 aligned_offset(base, 0, align) 定起点,
+    // 基址不对齐会让每个 buffer 白白少掉 (align - base%align) 字节, 最后一个张量放不下.
     ggml_ocl_device_context * dev_ctx = ggml_ocl_buffer_dev_ctx(buffer);
     return (void *) (uintptr_t) dev_ctx->alignment;
 }
@@ -173,9 +182,12 @@ static void ggml_ocl_buffer_memset_tensor(ggml_backend_buffer_t buffer, ggml_ten
         GGML_ABORT("ggml-ocl: memset_tensor with value %u on fp16-stored F32 tensor", value);
     }
 
+    cl_event evt = nullptr;
     OCL_CHECK(clEnqueueFillBuffer(q, extra->data_device, &value, sizeof(value),
-                                  eff_offset, dev_size, 0, nullptr, nullptr));
-    if (dev_ctx->backend == nullptr) {
+                                  eff_offset, dev_size, 0, nullptr, dev_ctx->backend ? &evt : nullptr));
+    if (dev_ctx->backend != nullptr) {
+        ocl_buffer_track_copy_event(dev_ctx->backend, evt);
+    } else {
         OCL_CHECK(clFinish(q));
     }
 }
@@ -194,28 +206,33 @@ static bool ggml_ocl_buffer_cpy_tensor(ggml_backend_buffer_t buffer, const ggml_
     cl_command_queue q       = ggml_ocl_buffer_copy_queue(buffer);
     cl_ulong         src_off = ocl_dev_offset(src, src_extra);
     cl_ulong         dst_off = ocl_dev_offset(dst, dst_extra);
+    cl_event evt = nullptr;
     OCL_CHECK(clEnqueueCopyBuffer(q, src_extra->data_device, dst_extra->data_device,
-                                  src_off, dst_off, ocl_dev_bytes(src, ggml_nbytes(src)), 0, nullptr, nullptr));
-    if (dev_ctx->backend == nullptr) {
+                                  src_off, dst_off, ocl_dev_bytes(src, ggml_nbytes(src)), 0, nullptr,
+                                  dev_ctx->backend ? &evt : nullptr));
+    if (dev_ctx->backend != nullptr) {
+        ocl_buffer_track_copy_event(dev_ctx->backend, evt);
+    } else {
         OCL_CHECK(clFinish(q));
     }
     return true;
 }
 
 static void ggml_ocl_buffer_clear(ggml_backend_buffer_t buffer, uint8_t value) {
-    ggml_ocl_device_context * dev_ctx = ggml_ocl_buffer_dev_ctx(buffer);
-    ggml_ocl_buffer_ctx *     ctx     = (ggml_ocl_buffer_ctx *) buffer->context;
+    ggml_ocl_buffer_ctx * ctx = (ggml_ocl_buffer_ctx *) buffer->context;
     cl_command_queue          q       = ggml_ocl_buffer_copy_queue(buffer);
     OCL_CHECK(clEnqueueFillBuffer(q, ctx->mem, &value, sizeof(value),
                                   0, ctx->size, 0, nullptr, nullptr));
-    if (dev_ctx->backend == nullptr) {
-        OCL_CHECK(clFinish(q));
-    }
+    // 整块清零只在初始化/重置时发生, 直接等完, 避免与第一次计算竞争
+    OCL_CHECK(clFinish(q));
 }
 
 static void ggml_ocl_buffer_reset(ggml_backend_buffer_t buffer) {
-    ggml_ocl_buffer_ctx * ctx = (ggml_ocl_buffer_ctx *) buffer->context;
-    ctx->extras.reset();
+    // 不能清空 extra 池: ggml-alloc 每次 compute 都会调用 reset, 但只对 data==NULL 的张量
+    // 重新 init_tensor, 已分配张量的 extra 若被清掉就成为悬空/复用状态, 读到的 cl_mem 和
+    // offset 属于别的张量 (表现为个别层突然算出几万的垃圾值).
+    // extra 里的 offset 在同一 buffer 内是不变的, 保持不动即可.
+    GGML_UNUSED(buffer);
 }
 
 static ggml_backend_buffer_i ggml_ocl_buffer_interface = {

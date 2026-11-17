@@ -79,11 +79,11 @@ kernel void gemm_q4_1_f16(global uchar * src0,
     const int ld_row      = lid / seg_per_row;
     const int ld_seg      = lid % seg_per_row;
 
-    half   acc0 = 0.0f;
-    half   acc1 = 0.0f;
-    half   acc2 = 0.0f;
-    half   acc3 = 0.0f;
-    uchar4 tmp  = (uchar4) (0, 0, 0, 0);
+    // float 累加: half 累加在 K>=6144 时误差会超出容差 (ocl-op-test 实测 K=6144/11008 FAIL)
+    float acc0 = 0.0f;
+    float acc1 = 0.0f;
+    float acc2 = 0.0f;
+    float acc3 = 0.0f;
 
     for (int k = 0; k < ne00; k += BK) {
         {
@@ -119,19 +119,20 @@ kernel void gemm_q4_1_f16(global uchar * src0,
         }
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        const int  fa = local_col_st * A_STRIDE;
-        const int  fb = local_row_st * B_STRIDE;
-        const half dd = lDM[local_col_st * 2 + 0];
-        const half mm = lDM[local_col_st * 2 + 1];
+        const int   fa = local_col_st * A_STRIDE;
+        const int   fb = local_row_st * B_STRIDE;
+        const float dd = (float) lDM[local_col_st * 2 + 0];
+        const float mm = (float) lDM[local_col_st * 2 + 1];
 
         for (int ik = 0; ik < BK; ++ik) {
             const uchar packed = lA[fa + (ik & (BK_HALF - 1))];
-            const half  q      = dd * (ik < BK_HALF ? (packed & 0x0F) : (packed >> 4)) + mm;
+            const int   nib    = (ik < BK_HALF) ? (packed & 0x0F) : (packed >> 4);
+            const float q      = fma(dd, (float) nib, mm);
 
-            acc0 += q * lB[fb + 0 * B_STRIDE + ik];
-            acc1 += q * lB[fb + 1 * B_STRIDE + ik];
-            acc2 += q * lB[fb + 2 * B_STRIDE + ik];
-            acc3 += q * lB[fb + 3 * B_STRIDE + ik];
+            acc0 = fma(q, (float) lB[fb + 0 * B_STRIDE + ik], acc0);
+            acc1 = fma(q, (float) lB[fb + 1 * B_STRIDE + ik], acc1);
+            acc2 = fma(q, (float) lB[fb + 2 * B_STRIDE + ik], acc2);
+            acc3 = fma(q, (float) lB[fb + 3 * B_STRIDE + ik], acc3);
         }
         barrier(CLK_LOCAL_MEM_FENCE);
     }
@@ -139,16 +140,16 @@ kernel void gemm_q4_1_f16(global uchar * src0,
     if (global_col_st < ne0) {
         global char * dbase = dst + global_col_st * nb0 + i1 * nb2 + i2 * nb3;
         if (global_row_st + 0 < ne1) {
-            *(global half *) (dbase + (global_row_st + 0) * nb1) = acc0;
+            *(global half *) (dbase + (global_row_st + 0) * nb1) = (half) acc0;
         }
         if (global_row_st + 1 < ne1) {
-            *(global half *) (dbase + (global_row_st + 1) * nb1) = acc1;
+            *(global half *) (dbase + (global_row_st + 1) * nb1) = (half) acc1;
         }
         if (global_row_st + 2 < ne1) {
-            *(global half *) (dbase + (global_row_st + 2) * nb1) = acc2;
+            *(global half *) (dbase + (global_row_st + 2) * nb1) = (half) acc2;
         }
         if (global_row_st + 3 < ne1) {
-            *(global half *) (dbase + (global_row_st + 3) * nb1) = acc3;
+            *(global half *) (dbase + (global_row_st + 3) * nb1) = (half) acc3;
         }
     }
 }

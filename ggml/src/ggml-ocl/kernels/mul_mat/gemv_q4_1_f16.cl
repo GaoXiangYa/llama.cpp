@@ -78,9 +78,10 @@ kernel void gemv_q4_1_f16(const global char * src0,
     int       i           = lane_id * qs_per_lane;
     const int i_end       = i + qs_per_lane;
 
-    half sum0 = 0.0;
-    half sum1 = 0.0;
-    half sum2 = 0.0;
+    // float 累加: 每个 lane 跨多块求和, half 在 K=6144 时误差偏大
+    float sum0 = 0.0f;
+    float sum1 = 0.0f;
+    float sum2 = 0.0f;
 
     while (i < i_end) {
         const int blk  = i / QS4_1;
@@ -127,25 +128,25 @@ kernel void gemv_q4_1_f16(const global char * src0,
             }
         }
 
-        sum0 = fma(acc0.x + acc0.y, dm0.x, sum0);
-        sum0 = fma(dm0.y, s, sum0);
+        sum0 = fma((float) (acc0.x + acc0.y), (float) dm0.x, sum0);
+        sum0 = fma((float) dm0.y, (float) s, sum0);
 
-        sum1 = fma(acc1.x + acc1.y, dm1.x, sum1);
-        sum1 = fma(dm1.y, s, sum1);
+        sum1 = fma((float) (acc1.x + acc1.y), (float) dm1.x, sum1);
+        sum1 = fma((float) dm1.y, (float) s, sum1);
 
-        sum2 = fma(acc2.x + acc2.y, dm2.x, sum2);
-        sum2 = fma(dm2.y, s, sum2);
+        sum2 = fma((float) (acc2.x + acc2.y), (float) dm2.x, sum2);
+        sum2 = fma((float) dm2.y, (float) s, sum2);
 
         i += chunk;
     }
 
-    const float2 s01 = (float2) ((float)sum0, (float)sum1);
+    const float2 s01 = (float2) (sum0, sum1);
     const float2 r01 = sub_group_reduce_add(s01, false, false);
-    const half   r2  = sub_group_reduce_add(sum2);
+    const float  r2  = sub_group_reduce_add(sum2);
 
     if (lane_id == 0) {
         if (row0 < ne01) { dst_ptr[row0] = (half) r01.s0; }
         if (row1 < ne01) { dst_ptr[row1] = (half) r01.s1; }
-        if (row2 < ne01) { dst_ptr[row2] = r2; }
+        if (row2 < ne01) { dst_ptr[row2] = (half) r2; }
     }
 }
