@@ -15,6 +15,10 @@ ggml_add_backend_library(${TARGET_NAME}
                          ops/set_rows.cpp
                          ops/get_rows.cpp
                          ops/mul_mat/mul_mat.cpp
+                         ops/mul_mat/gemv_f16_f16.cpp
+                         ops/mul_mat/gemv_q4_1_f16.cpp
+                         ops/mul_mat/gemm_f16_f16.cpp
+                         ops/mul_mat/gemm_q4_1_f16.cpp
                          ops/softmax.cpp
                          ops/rmsnorm.cpp
                          ops/glu.cpp
