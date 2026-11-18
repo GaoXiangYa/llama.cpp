@@ -97,7 +97,7 @@ kernel void gemv_q4_1_f16(const global char * src0,
         const half2 dm1 = *((const global half2 *) b1);
         const half2 dm2 = *((const global half2 *) b2);
 
-        half  s    = 0.0;
+        float  s    = 0.0;
         half2 acc0 = (half2) (0.0, 0.0);
         half2 acc1 = (half2) (0.0, 0.0);
         half2 acc2 = (half2) (0.0, 0.0);
@@ -115,8 +115,8 @@ kernel void gemv_q4_1_f16(const global char * src0,
             for (int q = 0; q < 4; ++q) {
                 const int   k  = (j << 2) + q;
                 const half2 xs = (half2) (x[boff + k], x[boff + QS4_1 + k]);  // 3 行共用, 只取一次
-                s += xs.x;                                                    // 只加一次
-                s += xs.y;
+                s += (float)xs.x;                                                    // 只加一次
+                s += (float)xs.y;
 
                 const uchar p0 = (uchar) (ww0 >> (q << 3));
                 const uchar p1 = (uchar) (ww1 >> (q << 3));
@@ -129,13 +129,13 @@ kernel void gemv_q4_1_f16(const global char * src0,
         }
 
         sum0 = fma((float) (acc0.x + acc0.y), (float) dm0.x, sum0);
-        sum0 = fma((float) dm0.y, (float) s, sum0);
+        sum0 = fma((float) dm0.y, s, sum0);
 
         sum1 = fma((float) (acc1.x + acc1.y), (float) dm1.x, sum1);
-        sum1 = fma((float) dm1.y, (float) s, sum1);
+        sum1 = fma((float) dm1.y, s, sum1);
 
         sum2 = fma((float) (acc2.x + acc2.y), (float) dm2.x, sum2);
-        sum2 = fma((float) dm2.y, (float) s, sum2);
+        sum2 = fma((float) dm2.y, s, sum2);
 
         i += chunk;
     }
