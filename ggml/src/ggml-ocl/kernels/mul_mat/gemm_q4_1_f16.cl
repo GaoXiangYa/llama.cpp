@@ -1,9 +1,9 @@
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-#define BM       16
+#define BM       32
 #define BN       64
 #define BK       32
-#define TM       4
+#define TM       8
 #define BK_HALF  16
 #define A_STRIDE 20
 #define B_STRIDE BK
@@ -79,11 +79,12 @@ kernel void gemm_q4_1_f16(global uchar * src0,
     const int ld_row      = lid / seg_per_row;
     const int ld_seg      = lid % seg_per_row;
 
-    // float 累加: half 累加在 K>=6144 时误差会超出容差 (ocl-op-test 实测 K=6144/11008 FAIL)
-    float acc0 = 0.0f;
-    float acc1 = 0.0f;
-    float acc2 = 0.0f;
-    float acc3 = 0.0f;
+    float acc[TM];
+    #pragma unroll
+    for (int r = 0; r < TM; ++ r) {
+        acc[r] = 0.0f;
+    }
+
 
     for (int k = 0; k < ne00; k += BK) {
         {
@@ -95,7 +96,6 @@ kernel void gemm_q4_1_f16(global uchar * src0,
                     lDM[ld_row * 2 + 1] = vload_half(1, (const global half *) blk);
                 }
                 *(local uint *) (lA + ld_row * A_STRIDE + ld_seg * 4) = *(const global uint *) (blk + 4 + ld_seg * 4);
-                // vstore4(vload4(0, blk + 4 + ld_seg * 4), 0, lA + ld_row * A_STRIDE + ld_seg * 4);
             } else {
                 if (ld_seg == 0) {
                     lDM[ld_row * 2 + 0] = (half) 0.0f;
@@ -129,27 +129,21 @@ kernel void gemm_q4_1_f16(global uchar * src0,
             const int   nib    = (ik < BK_HALF) ? (packed & 0x0F) : (packed >> 4);
             const float q      = fma(dd, (float) nib, mm);
 
-            acc0 = fma(q, (float) lB[fb + 0 * B_STRIDE + ik], acc0);
-            acc1 = fma(q, (float) lB[fb + 1 * B_STRIDE + ik], acc1);
-            acc2 = fma(q, (float) lB[fb + 2 * B_STRIDE + ik], acc2);
-            acc3 = fma(q, (float) lB[fb + 3 * B_STRIDE + ik], acc3);
+            #pragma unroll
+            for (int r = 0; r < TM; ++ r) {
+                acc[r] = fma(q, (float) lB[fb + r * B_STRIDE + ik], acc[r]);
+            }
         }
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
     if (global_col_st < ne0) {
         global char * dbase = dst + global_col_st * nb0 + i1 * nb2 + i2 * nb3;
-        if (global_row_st + 0 < ne1) {
-            *(global half *) (dbase + (global_row_st + 0) * nb1) = (half) acc0;
-        }
-        if (global_row_st + 1 < ne1) {
-            *(global half *) (dbase + (global_row_st + 1) * nb1) = (half) acc1;
-        }
-        if (global_row_st + 2 < ne1) {
-            *(global half *) (dbase + (global_row_st + 2) * nb1) = (half) acc2;
-        }
-        if (global_row_st + 3 < ne1) {
-            *(global half *) (dbase + (global_row_st + 3) * nb1) = (half) acc3;
+        #pragma unroll
+        for (int r = 0; r < TM; ++ r) {
+            if (global_row_st + r < ne1) {
+                *(global half *) (dbase + (global_row_st + r) * nb1) = (half)acc[r];
+            }
         }
     }
 }

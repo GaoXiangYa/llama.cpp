@@ -87,7 +87,7 @@ static const mul_mat_variant g_mul_mat_variants[] = {
     { "mul_mat/gemv_f16_f16",  "gemv_f16_f16",  true,  false, 4, 0,  0,  EXTRA_GEMV_HALF },
     { "mul_mat/gemv_q4_1_f16", "gemv_q4_1_f16", true,  true,  3, 0,  0,  EXTRA_GEMV_Q4_1 },
     { "mul_mat/gemm_f16_f16",  "gemm_f16_f16",  false, false, 0, 16, 16, EXTRA_GEMM_N },
-    { "mul_mat/gemm_q4_1_f16", "gemm_q4_1_f16", false, true,  0, 16, 64, EXTRA_GEMM_N },
+    { "mul_mat/gemm_q4_1_f16", "gemm_q4_1_f16", false, true,  0, 32, 64, EXTRA_GEMM_N },
 };
 
 bool mul_mat_run(ggml_ocl_backend * b, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
