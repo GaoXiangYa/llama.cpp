@@ -1,15 +1,12 @@
-#include "ggml-impl.h"
 #include "ggml-ocl-internal.h"
 #include "ops/mul_mat/mul_mat_variants.h"
 
 namespace ops {
 
-// 多 token (gemm), 权重 F16/F32 (F32 在设备上也是 half).
-// 配置必须和 kernels/mul_mat/gemm_f16_f16.cl 一致
 namespace {
 constexpr int NTH = 256;
-constexpr int BM  = 16;  // token 方向 tile
-constexpr int BN  = 16;  // neuron 方向 tile
+constexpr int BM  = 64;  // token 方向 tile
+constexpr int BN  = 64;  // neuron 方向 tile
 }  // namespace
 
 bool gemm_f16_f16_run(ggml_ocl_backend *  b,

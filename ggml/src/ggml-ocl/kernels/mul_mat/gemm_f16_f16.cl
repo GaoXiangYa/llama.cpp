@@ -1,10 +1,20 @@
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-#define BM 16
-#define BN 16
+// tile is BM x BN = NTH * TM * TN, each lane owns TM x TN outputs
+#define BM 64
+#define BN 64
 #define BK 16
 
-// fp16 存储: src0 本来就是 F16, src1/dst 是 F32 -> half
+#define NTH 256
+#define TM 4
+#define TN 4
+
+// padding keeps float4 loads aligned and spreads the transposed LDS writes
+#define LDA (BN + 4)
+#define LDB (BM + 4)
+
+// dst[neuron][token] = sum_k src0[k][neuron] * src1[k][token]
+// LDS keeps float data as [k][dim], so the inner loop reads float4 and uses vector FMA.
 kernel void gemm_f16_f16(global char * src0,
                          ulong         offset0,
                          global char * src1,
@@ -38,7 +48,7 @@ kernel void gemm_f16_f16(global char * src0,
                          int           num_groups) {
     src0 = src0 + offset0;
     src1 = src1 + offset1;
-    dst  = dst + offsetd;
+    dst  = dst  + offsetd;
 
     const int i0 = get_group_id(0);
     const int i1 = get_group_id(1);
@@ -50,56 +60,88 @@ kernel void gemm_f16_f16(global char * src0,
     const int i01 = i1 / (ne12 / ne02);
     const int i02 = i2 / (ne13 / ne03);
 
-    const int lid      = get_local_id(0);
-    const int warp_id  = lid >> 6;  // 0..3
-    const int lane_id  = lid & 63;  // 0..63
-    const int warp_row = warp_id >> 1;
-    const int warp_col = warp_id & 1;
-    const int lane_row = lane_id >> 3;
-    const int lane_col = lane_id & 7;
+    const int lid = get_local_id(0);
 
-    local half lA[BK * BN];
-    local half lB[BK * BM];
+    const int group_row = i0 / num_groups;  // token
+    const int group_col = i0 % num_groups;  // neuron
 
-    const int group_row  = i0 / num_groups;
-    const int group_col  = i0 % num_groups;
-    const int local_row  = (warp_row << 3) + lane_row;
-    const int local_col  = (warp_col << 3) + lane_col;
-    const int global_row = group_row * BM + local_row;
-    const int global_col = group_col * BN + local_col;
+    // lane (row block, col block) inside the tile
+    const int local_row_st = (lid / (BN / TN)) * TM;  // 0..BM-TN step TM
+    const int local_col_st = (lid % (BN / TN)) * TN;  // 0..BN-TN step TN
 
-    float sum = 0.0f;
+    const int global_row_st = group_row * BM + local_row_st;  // token  (dst row)
+    const int global_col_st = group_col * BN + local_col_st;  // neuron (dst col)
+
+    // declared as float4 so the base address is 16-byte aligned
+    local float4 lA4[BK * LDA / 4];
+    local float4 lB4[BK * LDB / 4];
+    local float * lA = (local float *) lA4;  // lA[kk * LDA + col]
+    local float * lB = (local float *) lB4;  // lB[kk * LDB + row]
+
+    // one float4 accumulator per output row
+    float4 acc[TM];
+#pragma unroll
+    for (int r = 0; r < TM; ++r) {
+        acc[r] = (float4) (0.0f);
+    }
 
     for (int k = 0; k < ne00; k += BK) {
-        // load src0 to local memory
-        const int global_a_row = global_col;
-        const int global_a_col = k + local_row;
-
-        if (global_a_row < ne01 && global_a_col < ne00) {
-            lA[local_col * BK + local_row] =
-                *(global half *) (src0 + global_a_col * nb00 + global_a_row * nb01 + i01 * nb02 + i02 * nb03);
-        } else {
-            lA[local_col * BK + local_row] = (half) 0.0f;
+        // src0 [K, N] into lA[kk][col], converted once
+        for (int idx = lid; idx < BK * BN; idx += NTH) {
+            const int col  = idx / BK;
+            const int kk   = idx % BK;
+            const int gcol = group_col * BN + col;
+            const int gk   = k + kk;
+            float v = 0.0f;
+            if (gcol < ne01 && gk < ne00) {
+                v = (float) *(const global half *) (src0 + gk * nb00 + gcol * nb01 + i01 * nb02 + i02 * nb03);
+            }
+            lA[kk * LDA + col] = v;
         }
 
-        // load src1 to local memory
-        const int global_b_row = global_row;
-        const int global_b_col = k + local_col;
-        if (global_b_row < ne11 && global_b_col < ne10) {
-            lB[local_row * BN + local_col] =
-                *(global half *) (src1 + global_b_col * nb10 + global_b_row * nb11 + i11 * nb12 + i12 * nb13);
-        } else {
-            lB[local_row * BN + local_col] = (half) 0.0f;
+        // src1 [K, M] into lB[kk][row]
+        for (int idx = lid; idx < BK * BM; idx += NTH) {
+            const int row  = idx / BK;
+            const int kk   = idx % BK;
+            const int grow = group_row * BM + row;
+            const int gk   = k + kk;
+            float v = 0.0f;
+            if (grow < ne11 && gk < ne10) {
+                v = (float) *(const global half *) (src1 + gk * nb10 + grow * nb11 + i11 * nb12 + i12 * nb13);
+            }
+            lB[kk * LDB + row] = v;
         }
+
         barrier(CLK_LOCAL_MEM_FENCE);
 
+        // 2 LDS float4 loads + 4 vector FMA for 16 MACs
+        // unroll 2 only: full unroll keeps 16 ra + 16 rb live and spills
+#pragma unroll 2
         for (int kk = 0; kk < BK; ++kk) {
-            sum += convert_float(lA[local_col * BK + kk]) * convert_float(lB[local_row * BK + kk]);
+            const float4 ra = *(const local float4 *) (&lA[kk * LDA + local_col_st]);
+            const float4 rb = *(const local float4 *) (&lB[kk * LDB + local_row_st]);
+#pragma unroll
+            for (int r = 0; r < TM; ++r) {
+                acc[r] = fma((float4) rb[r], ra, acc[r]);
+            }
         }
+
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    if (global_col < ne0 && global_row < ne1) {
-        *(global half *) (dst + global_col * nb0 + global_row * nb1 + i1 * nb2 + i2 * nb3) = convert_half(sum);
+#pragma unroll
+    for (int r = 0; r < TM; ++r) {
+        const int grow = global_row_st + r;
+        if (grow >= ne1) {
+            continue;
+        }
+#pragma unroll
+        for (int c = 0; c < TN; ++c) {
+            const int gcol = global_col_st + c;
+            if (gcol >= ne0) {
+                continue;
+            }
+            *(global half *) (dst + gcol * nb0 + grow * nb1 + i1 * nb2 + i2 * nb3) = (half) acc[r][c];
+        }
     }
 }
