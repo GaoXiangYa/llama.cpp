@@ -7,7 +7,7 @@ namespace ops {
 namespace {
 constexpr int NTH = 256;
 constexpr int BM  = 64;
-constexpr int BN  = 64;
+constexpr int BN  = 256; // neuron 方向 tile
 }  // namespace
 
 bool gemm_q4_1_f16_run(ggml_ocl_backend *  b,

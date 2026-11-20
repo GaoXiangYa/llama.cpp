@@ -2,12 +2,12 @@
 
 // tile is BM x BN = NTH * TM * TN, each lane owns TM x TN outputs
 #define BM 64
-#define BN 64
-#define BK 32
+#define BN 256
+#define BK 16
 
 #define NTH 256
-#define TM 4
-#define TN 4
+#define TM 8
+#define TN 8
 
 // padding keeps float4 loads aligned and spreads the transposed LDS writes
 #define LDA (BN + 4)
@@ -16,11 +16,8 @@
 #if (BN * BM != NTH * TM * TN)
 #    error "tile must be NTH * TM * TN"
 #endif
-#if (BK != 32)
-#    error "dequant below assumes one Q4_1 block per k block"
-#endif
-#if (BN * 4 != NTH)
-#    error "dequant maps 4 threads per Q4_1 block, so BN must be NTH / 4"
+#if (BN != NTH)
+#    error "dequant maps one thread per Q4_1 block, so BN must equal NTH"
 #endif
 
 // dst[neuron][token] = sum_k dequant(src0)[k][neuron] * src1[k][token]
@@ -85,18 +82,21 @@ kernel void gemm_q4_1_f16(global uchar * src0,
     local float * lAf = (local float *) lA4;  // lAf[kk * LDA + col]
     local float * lBf = (local float *) lB4;  // lBf[kk * LDB + row]
 
-    // 4 threads share one Q4_1 block, each takes 4 of the 16 quant bytes
-    const int acol = lid / 4;  // 0..BN-1
-    const int aseg = lid % 4;  // 0..3
+    // one thread dequantizes one whole Q4_1 block (BN == NTH)
+    const int acol = lid;  // 0..BN-1
 
-    float4 acc[TM];
+    // TN/4 float4 per row: TN columns split into 4-wide halves
+    float4 acc[TM][TN / 4];
 #pragma unroll
     for (int r = 0; r < TM; ++r) {
-        acc[r] = (float4) (0.0f);
+#pragma unroll
+        for (int h = 0; h < TN / 4; ++h) {
+            acc[r][h] = (float4) (0.0f);
+        }
     }
 
     for (int k = 0; k < ne00; k += BK) {
-        // weights: dequantize one Q4_1 block (d, m, 16 quant bytes) into 32 floats
+        // weights: dequantize half of a Q4_1 block (d, m, 16 quant bytes) into BK floats
         {
             const int gcol = group_col * BN + acol;
             if (gcol < ne01) {
@@ -104,20 +104,24 @@ kernel void gemm_q4_1_f16(global uchar * src0,
                 const float2 dm = vload_half2(0, (const global half *) blk);
                 const float dd = dm.x;
                 const float mm = dm.y;
-                const uint  q  = *(const global uint *) (blk + 4 + aseg * 4);
+
+                // BK=16 covers half of a Q4_1 block: k/16 selects the nibble
+                const int is_high = (k >> 4) & 1;
 #pragma unroll
                 for (int j = 0; j < 4; ++j) {
-                    const uchar b   = (uchar) ((q >> (8 * j)) & 0xFF);
-                    const int   kk0 = aseg * 4 + j;  // 0..15
-                    lAf[kk0 * LDA + acol]        = fma(dd, (float) (b & 0x0F), mm);
-                    lAf[(kk0 + 16) * LDA + acol] = fma(dd, (float) (b >> 4),   mm);
+                    const uint w = *(const global uint *) (blk + 4 + j * 4);  // 4 bytes = 8 values
+#pragma unroll
+                    for (int t = 0; t < 4; ++t) {
+                        const uchar b    = (uchar) ((w >> (8 * t)) & 0xFF);
+                        const int   kk   = j * 4 + t;  // 0..15
+                        const int   nib  = is_high ? (b >> 4) : (b & 0x0F);
+                        lAf[kk * LDA + acol] = fma(dd, (float) nib, mm);
+                    }
                 }
             } else {
 #pragma unroll
-                for (int j = 0; j < 4; ++j) {
-                    const int kk0 = aseg * 4 + j;
-                    lAf[kk0 * LDA + acol]        = 0.0f;
-                    lAf[(kk0 + 16) * LDA + acol] = 0.0f;
+                for (int j = 0; j < BK; ++j) {
+                    lAf[j * LDA + acol] = 0.0f;
                 }
             }
         }
@@ -137,15 +141,23 @@ kernel void gemm_q4_1_f16(global uchar * src0,
 
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        // 2 LDS float4 loads + 4 vector FMA for 16 MACs, 4 independent chains
-        // unroll 2 only: a full unroll keeps too many values live and spills
-#pragma unroll 2
+        // 3 LDS float4 loads + 8 vector FMA for 64 MACs, 16 independent chains
+        // no unroll: 16 accumulators already fill the register budget
+#pragma unroll 1
         for (int kk = 0; kk < BK; ++kk) {
-            const float4 ra = *(const local float4 *) (&lAf[kk * LDA + local_col_st]);
-            const float4 rb = *(const local float4 *) (&lBf[kk * LDB + local_row_st]);
+            const float4 ra0 = *(const local float4 *) (&lAf[kk * LDA + local_col_st + 0]);
+            const float4 ra1 = *(const local float4 *) (&lAf[kk * LDA + local_col_st + 4]);
 #pragma unroll
-            for (int r = 0; r < TM; ++r) {
-                acc[r] = fma((float4) rb[r], ra, acc[r]);
+            for (int r = 0; r < TM; r += 4) {
+                const float4 rb = *(const local float4 *) (&lBf[kk * LDB + local_row_st + r]);
+                acc[r + 0][0] = fma((float4) rb.x, ra0, acc[r + 0][0]);
+                acc[r + 1][0] = fma((float4) rb.y, ra0, acc[r + 1][0]);
+                acc[r + 2][0] = fma((float4) rb.z, ra0, acc[r + 2][0]);
+                acc[r + 3][0] = fma((float4) rb.w, ra0, acc[r + 3][0]);
+                acc[r + 0][1] = fma((float4) rb.x, ra1, acc[r + 0][1]);
+                acc[r + 1][1] = fma((float4) rb.y, ra1, acc[r + 1][1]);
+                acc[r + 2][1] = fma((float4) rb.z, ra1, acc[r + 2][1]);
+                acc[r + 3][1] = fma((float4) rb.w, ra1, acc[r + 3][1]);
             }
         }
 
@@ -159,12 +171,15 @@ kernel void gemm_q4_1_f16(global uchar * src0,
             continue;
         }
 #pragma unroll
-        for (int c = 0; c < TN; ++c) {
-            const int gcol = group_col * BN + local_col_st + c;
-            if (gcol >= ne0) {
-                continue;
+        for (int h = 0; h < TN / 4; ++h) {
+#pragma unroll
+            for (int t = 0; t < 4; ++t) {
+                const int gcol = group_col * BN + local_col_st + h * 4 + t;
+                if (gcol >= ne0) {
+                    continue;
+                }
+                *(global half *) (dst + gcol * nb0 + grow * nb1 + i1 * nb2 + i2 * nb3) = (half) acc[r][h][t];
             }
-            *(global half *) (dst + gcol * nb0 + grow * nb1 + i1 * nb2 + i2 * nb3) = (half) acc[r][c];
         }
     }
 }
