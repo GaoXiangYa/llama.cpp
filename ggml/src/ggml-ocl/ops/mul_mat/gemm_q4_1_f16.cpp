@@ -4,11 +4,10 @@
 
 namespace ops {
 
-// 多 token (gemm), 权重 Q4_1. 配置必须和 kernels/mul_mat/gemm_q4_1_f16.cl 一致
 namespace {
 constexpr int NTH = 256;
-constexpr int BM  = 32;  // token 方向 tile
-constexpr int BN  = 64;  // neuron 方向 tile
+constexpr int BM  = 64;
+constexpr int BN  = 64;
 }  // namespace
 
 bool gemm_q4_1_f16_run(ggml_ocl_backend *  b,
