@@ -3289,9 +3289,6 @@ struct ggml_tensor * ggml_mul_mat(
     // a: [2048, 151936, 1, 1]
     // b: [2048, 512, 1, 1]
     // c: [151936, 512, 1, 1]
-    if (a->ne[1] == 1) {
-        printf("is gemv\n");
-    }
     const int64_t ne[4] = { a->ne[1], b->ne[1], b->ne[2], b->ne[3] };
     struct ggml_tensor * result = ggml_new_tensor(ctx, GGML_TYPE_F32, 4, ne);
 
