@@ -14,7 +14,7 @@
 #define LDB (BM + 4)
 
 // dst[neuron][token] = sum_k src0[k][neuron] * src1[k][token]
-// LDS keeps float data as [k][dim], so the inner loop reads float4 and uses vector FMA.
+// LDS holds float data as [k][dim], so the inner loop reads float4 and uses vector FMA.
 kernel void gemm_f16_f16(global char * src0,
                          ulong         offset0,
                          global char * src1,
@@ -65,12 +65,8 @@ kernel void gemm_f16_f16(global char * src0,
     const int group_row = i0 / num_groups;  // token
     const int group_col = i0 % num_groups;  // neuron
 
-    // lane (row block, col block) inside the tile
-    const int local_row_st = (lid / (BN / TN)) * TM;  // 0..BM-TN step TM
-    const int local_col_st = (lid % (BN / TN)) * TN;  // 0..BN-TN step TN
-
-    const int global_row_st = group_row * BM + local_row_st;  // token  (dst row)
-    const int global_col_st = group_col * BN + local_col_st;  // neuron (dst col)
+    const int local_row_st = (lid / (BN / TN)) * TM;
+    const int local_col_st = (lid % (BN / TN)) * TN;
 
     // declared as float4 so the base address is 16-byte aligned
     local float4 lA4[BK * LDA / 4];
@@ -78,7 +74,6 @@ kernel void gemm_f16_f16(global char * src0,
     local float * lA = (local float *) lA4;  // lA[kk * LDA + col]
     local float * lB = (local float *) lB4;  // lB[kk * LDB + row]
 
-    // one float4 accumulator per output row
     float4 acc[TM];
 #pragma unroll
     for (int r = 0; r < TM; ++r) {
@@ -114,8 +109,8 @@ kernel void gemm_f16_f16(global char * src0,
 
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        // 2 LDS float4 loads + 4 vector FMA for 16 MACs
-        // unroll 2 only: full unroll keeps 16 ra + 16 rb live and spills
+        // 2 LDS float4 loads + 4 vector FMA for 16 MACs, 4 independent accumulator chains
+        // unroll 2 only: full unroll keeps too many values live and spills
 #pragma unroll 2
         for (int kk = 0; kk < BK; ++kk) {
             const float4 ra = *(const local float4 *) (&lA[kk * LDA + local_col_st]);
@@ -131,13 +126,13 @@ kernel void gemm_f16_f16(global char * src0,
 
 #pragma unroll
     for (int r = 0; r < TM; ++r) {
-        const int grow = global_row_st + r;
+        const int grow = group_row * BM + local_row_st + r;
         if (grow >= ne1) {
             continue;
         }
 #pragma unroll
         for (int c = 0; c < TN; ++c) {
-            const int gcol = global_col_st + c;
+            const int gcol = group_col * BN + local_col_st + c;
             if (gcol >= ne0) {
                 continue;
             }
