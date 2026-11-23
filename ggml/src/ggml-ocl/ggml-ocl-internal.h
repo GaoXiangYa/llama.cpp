@@ -200,10 +200,31 @@ struct ocl_kernel_stat {
     cl_ulong    total_ns = 0;
 };
 
+// one enqueued kernel whose timing is collected later, so there is no
+// per-kernel clWaitForEvents (which would inflate every small kernel)
+struct ocl_prof_entry {
+    cl_event     evt     = nullptr;
+    cl_kernel    kernel  = nullptr;
+    const char * op_name = nullptr;
+};
+
 struct ocl_stats {
+    struct name_entry {
+        cl_kernel   k;
+        std::string name;
+    };
+
     std::vector<ocl_kernel_stat> kernels;
-    void                         record(const char * op, const char * kernel, cl_ulong ns);
-    void                         print() const;
+    std::vector<name_entry>      kernel_names;  // handle -> name cache
+
+    cl_ulong host_ns      = 0;  // CPU time spent in the enqueue loop
+    cl_ulong graph_gpu_ns = 0;  // GPU span of every graph, summed
+    int      graphs       = 0;
+    int      launches     = 0;
+
+    const char * name_for(cl_kernel k);
+    void         record(const char * op, cl_kernel k, cl_ulong ns);
+    void         print() const;
 };
 #endif  // GGML_OCL_PROFILING
 
@@ -308,6 +329,13 @@ struct ggml_ocl_backend {
     std::vector<cl_event> pending_copy_events;
 
 #ifdef GGML_OCL_PROFILING
-    ocl_stats stats;
+    ocl_stats                   stats;
+    std::vector<ocl_prof_entry> pending_prof;
 #endif
 };
+
+#ifdef GGML_OCL_PROFILING
+// wait for all pending kernel events and accumulate their timings;
+// called once per graph and on backend free
+void ocl_prof_flush(ggml_ocl_backend * backend);
+#endif

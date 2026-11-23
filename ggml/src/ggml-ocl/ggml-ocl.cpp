@@ -215,6 +215,7 @@ static void ggml_ocl_backend_free(ggml_backend_t backend) {
         OCL_CHECK(clReleaseCommandQueue(b->q_copy));
     }
 #ifdef GGML_OCL_PROFILING
+    ocl_prof_flush(b);
     b->stats.print();
 #endif
 
@@ -346,6 +347,9 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
     ocl_exec_wait_pending_copies(b);
     ggml_ocl_dump_graph_leaves(backend, cgraph);
 
+#ifdef GGML_OCL_PROFILING
+    const int64_t prof_t0 = ggml_time_us();
+#endif
     for (int i = 0; i < cgraph->n_nodes; i++) {
         ggml_tensor * node = cgraph->nodes[i];
 
@@ -412,7 +416,15 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
         ggml_ocl_check_node_nan(backend, node);
     }
 
+#ifdef GGML_OCL_PROFILING
+    b->stats.host_ns += (cl_ulong) (ggml_time_us() - prof_t0) * 1000ULL;
+#endif
+
     ocl_exec_flush(b);
+
+#ifdef GGML_OCL_PROFILING
+    ocl_prof_flush(b);
+#endif
     return GGML_STATUS_SUCCESS;
 }
 
