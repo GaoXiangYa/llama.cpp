@@ -45,6 +45,7 @@ set(GGML_OCL_KERNELS
     mul/mul_f16
     glu/swiglu_f16
     rmsnorm/rmsnorm_f16
+    rmsnorm/rmsnorm_mul_f16
     softmax/softmax_f16
     get_rows/get_rows_f16_i32_f16
     set_rows/set_rows_f16_i64_f16

@@ -24,6 +24,7 @@ bool mul_mat_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor
 
 bool rmsnorm_supports(const ggml_ocl_caps * caps, const ggml_tensor * op);
 bool rmsnorm_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst);
+bool rmsnorm_mul_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst);
 
 bool rope_supports(const ggml_ocl_caps * caps, const ggml_tensor * op);
 bool rope_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst);

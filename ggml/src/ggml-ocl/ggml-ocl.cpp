@@ -1,20 +1,23 @@
 // ggml-ocl backend: backend registration (DESIGN.md sections 4/17, M0 skeleton)
 
 #include "ggml-ocl.h"
+
 #include "ggml-ocl-internal.h"
 #include "ggml.h"
+#include "ops/ops.h"
 
-#include <memory>
-#include <string>
-#include <vector>
-
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 extern struct ggml_backend_device_i ggml_ocl_device_interface;
 
-
-static std::vector<ggml_backend_device> g_ggml_ocl_devices;
+static std::vector<ggml_backend_device>                      g_ggml_ocl_devices;
 static std::vector<std::unique_ptr<ggml_ocl_device_context>> g_ggml_ocl_dev_ctxs;
 
 static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg * reg) {
@@ -23,7 +26,7 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
     enum { NPLAT = 16, NDEV = 16 };
 
     cl_platform_id platform_ids[NPLAT];
-    cl_uint n_platforms = 0;
+    cl_uint        n_platforms = 0;
     if (clGetPlatformIDs(NPLAT, platform_ids, &n_platforms) != CL_SUCCESS) {
         GGML_LOG_ERROR("ggml-ocl: platform IDs not available.\n");
         return found;
@@ -33,22 +36,23 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
         cl_platform_id platform;
         cl_device_id   id;
         cl_device_type type;
-        char name[128];
+        char           name[128];
     };
+
     std::vector<dev_info> devices;
 
     cl_platform_id default_platform = nullptr;
     cl_device_id   default_device   = nullptr;
 
     for (cl_uint i = 0; i < n_platforms; i++) {
-        char pname[128] = {0};
-        char pvendor[128] = {0};
+        char pname[128]   = { 0 };
+        char pvendor[128] = { 0 };
         clGetPlatformInfo(platform_ids[i], CL_PLATFORM_NAME, sizeof(pname), pname, nullptr);
         clGetPlatformInfo(platform_ids[i], CL_PLATFORM_VENDOR, sizeof(pvendor), pvendor, nullptr);
 
         cl_device_id device_ids[NDEV];
-        cl_uint n_devices = 0;
-        cl_int err = clGetDeviceIDs(platform_ids[i], CL_DEVICE_TYPE_ALL, NDEV, device_ids, &n_devices);
+        cl_uint      n_devices = 0;
+        cl_int       err       = clGetDeviceIDs(platform_ids[i], CL_DEVICE_TYPE_ALL, NDEV, device_ids, &n_devices);
         if (err == CL_DEVICE_NOT_FOUND) {
             continue;
         }
@@ -57,7 +61,7 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
         }
 
         for (cl_uint j = 0; j < n_devices; j++) {
-            dev_info d = { platform_ids[i], device_ids[j], 0, {0} };
+            dev_info d = { platform_ids[i], device_ids[j], 0, { 0 } };
             clGetDeviceInfo(d.id, CL_DEVICE_TYPE, sizeof(d.type), &d.type, nullptr);
             clGetDeviceInfo(d.id, CL_DEVICE_NAME, sizeof(d.name), d.name, nullptr);
             devices.push_back(d);
@@ -84,7 +88,7 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
         for (const dev_info & d : devices) {
             bool match = true;
             if (user_platform != nullptr && user_platform[0] != 0) {
-                char pname[128] = {0};
+                char pname[128] = { 0 };
                 clGetPlatformInfo(d.platform, CL_PLATFORM_NAME, sizeof(pname), pname, nullptr);
                 match = match && strstr(pname, user_platform) != nullptr;
             }
@@ -92,7 +96,7 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
                 match = match && strstr(d.name, user_device) != nullptr;
             }
             if (match) {
-                selected = d.id;
+                selected         = d.id;
                 default_platform = d.platform;
                 break;
             }
@@ -113,12 +117,10 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
         }
     }
 
-    cl_int err;
-    cl_context_properties props[] = {
-        (intptr_t) CL_CONTEXT_PLATFORM, (intptr_t) default_platform, 0
-    };
-    cl_context shared_context = clCreateContext(props, platform_devices.size(),
-                                                platform_devices.data(), nullptr, nullptr, &err);
+    cl_int                err;
+    cl_context_properties props[] = { (intptr_t) CL_CONTEXT_PLATFORM, (intptr_t) default_platform, 0 };
+    cl_context            shared_context =
+        clCreateContext(props, platform_devices.size(), platform_devices.data(), nullptr, nullptr, &err);
     OCL_CHECK(err);
 
     for (const dev_info & d : devices) {
@@ -152,7 +154,7 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
         cl_uint align_bits = 0;
         clGetDeviceInfo(d.id, CL_DEVICE_MEM_BASE_ADDR_ALIGN, sizeof(align_bits), &align_bits, nullptr);
 
-        auto dev_ctx = std::unique_ptr<ggml_ocl_device_context>(new ggml_ocl_device_context());
+        auto dev_ctx             = std::unique_ptr<ggml_ocl_device_context>(new ggml_ocl_device_context());
         dev_ctx->device          = d.id;
         dev_ctx->device_name     = d.name;
         dev_ctx->global_mem_size = global_mem;
@@ -163,7 +165,7 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
 
         // fp16 存储是固定策略: 设备不支持则跳过, 由上层回退到 CPU
         {
-            char ext[4096] = {0};
+            char ext[4096] = { 0 };
             clGetDeviceInfo(d.id, CL_DEVICE_EXTENSIONS, sizeof(ext), ext, nullptr);
             if (strstr(ext, "cl_khr_fp16") == nullptr) {
                 GGML_LOG_ERROR("ggml-ocl: device %s has no cl_khr_fp16, skipped\n", d.name);
@@ -171,7 +173,7 @@ static std::vector<ggml_backend_device> ggml_ocl_probe_devices(ggml_backend_reg 
             }
         }
 
-        cl_int qerr = CL_SUCCESS;
+        cl_int qerr     = CL_SUCCESS;
         dev_ctx->q_load = clCreateCommandQueueWithProperties(shared_context, d.id, nullptr, &qerr);
         OCL_CHECK(qerr);
 
@@ -222,7 +224,7 @@ static void ggml_ocl_backend_free(ggml_backend_t backend) {
     // context 为进程级共享 (dev_ctx 持有), 不随 backend 释放;
     // backend 可能被 sched 多次 init/free
     ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) backend->device->context;
-    dev_ctx->backend = nullptr;
+    dev_ctx->backend                  = nullptr;
 
     delete b;
     delete backend;
@@ -262,8 +264,8 @@ static void ggml_ocl_dump_tensor_stats(ggml_backend_t backend, ggml_tensor * nod
 
     size_t count_nan = 0;
     size_t count_inf = 0;
-    double v_min =  INFINITY;
-    double v_max = -INFINITY;
+    double v_min     = INFINITY;
+    double v_max     = -INFINITY;
 
     auto scan_one = [&](float v) {
         if (isnan(v)) {
@@ -278,26 +280,25 @@ static void ggml_ocl_dump_tensor_stats(ggml_backend_t backend, ggml_tensor * nod
 
     if (node->type == GGML_TYPE_F32) {
         const float * data = (const float *) buf.data();
-        const size_t n = buf.size() / sizeof(float);
+        const size_t  n    = buf.size() / sizeof(float);
         for (size_t i = 0; i < n; ++i) {
             scan_one(data[i]);
         }
     } else {
         const ggml_fp16_t * data = (const ggml_fp16_t *) buf.data();
-        const size_t n = buf.size() / sizeof(ggml_fp16_t);
+        const size_t        n    = buf.size() / sizeof(ggml_fp16_t);
         for (size_t i = 0; i < n; ++i) {
             scan_one(GGML_FP16_TO_FP32(data[i]));
         }
     }
 
-    GGML_LOG_INFO("ggml-ocl: %-5s op=%-10s name=%-34s ne=[%lld %lld %lld %lld] min=%g max=%g nan=%zu inf=%zu dev=%p off=%llu bufsz=%zu\n",
-                  tag, ggml_op_name(node->op), node->name ? node->name : "?",
-                  (long long) node->ne[0], (long long) node->ne[1],
-                  (long long) node->ne[2], (long long) node->ne[3],
-                  v_min, v_max, count_nan, count_inf,
-                  ex ? (void *) ex->data_device : nullptr,
-                  ex ? (unsigned long long) ex->offset : 0ULL,
-                  node->buffer ? ggml_backend_buffer_get_size(node->buffer) : 0);
+    GGML_LOG_INFO(
+        "ggml-ocl: %-5s op=%-10s name=%-34s ne=[%lld %lld %lld %lld] min=%g max=%g nan=%zu inf=%zu dev=%p off=%llu "
+        "bufsz=%zu\n",
+        tag, ggml_op_name(node->op), node->name ? node->name : "?", (long long) node->ne[0], (long long) node->ne[1],
+        (long long) node->ne[2], (long long) node->ne[3], v_min, v_max, count_nan, count_inf,
+        ex ? (void *) ex->data_device : nullptr, ex ? (unsigned long long) ex->offset : 0ULL,
+        node->buffer ? ggml_backend_buffer_get_size(node->buffer) : 0);
 }
 
 static void ggml_ocl_check_node_nan(ggml_backend_t backend, ggml_tensor * node) {
@@ -347,11 +348,31 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
     ocl_exec_wait_pending_copies(b);
     ggml_ocl_dump_graph_leaves(backend, cgraph);
 
+    std::unordered_map<const ggml_tensor *, int32_t> use_cnt;
+    std::unordered_map<const ggml_tensor *, int32_t> only_use;
+
+    for (int i = 0; i < cgraph->n_nodes; ++i) {
+        auto * node = cgraph->nodes[i];
+        for (int j = 0; j < GGML_MAX_SRC; ++j) {
+            const ggml_tensor * s = node->src[j];
+            if (s == nullptr) {
+                continue;
+            }
+            use_cnt[s]++;
+            only_use[s] = i;
+        }
+    }
+
 #ifdef GGML_OCL_PROFILING
     const int64_t prof_t0 = ggml_time_us();
 #endif
+    std::vector<char> skip(cgraph->n_nodes, 0);
     for (int i = 0; i < cgraph->n_nodes; i++) {
         ggml_tensor * node = cgraph->nodes[i];
+
+        if (skip[i]) {
+            continue;
+        }
 
         if (ggml_is_empty(node)) {
             continue;
@@ -368,6 +389,20 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
         }
         if ((node->flags & GGML_TENSOR_FLAG_COMPUTE) == 0) {
             continue;
+        }
+
+        if (node->op == GGML_OP_RMS_NORM) {
+            auto uc = use_cnt.find(node);
+            if (uc != use_cnt.end() && uc->second == 1 && use_cnt[node] != 0) {
+                auto * c = cgraph->nodes[only_use[node]];
+                if (c->op == GGML_OP_MUL && c->src[0] == node && c->src[1] != nullptr) {
+                    if (ops::rmsnorm_mul_run(b, node->src[0], c->src[1], c)) {
+                        skip[only_use[node]] = 1;
+                        GGML_LOG_INFO("ggml-ocl: fused %s + MUL %s\n", node->name, c->name);
+                        continue;
+                    }
+                }
+            }
         }
 
         // 调试: dump 指定节点在执行前的 src/dst 数值 (GGML_OCL_DUMP_BEFORE=<名字子串>)
@@ -387,12 +422,11 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
                     continue;
                 }
                 ggml_ocl_tensor_extra * e = (ggml_ocl_tensor_extra *) t->extra;
-                GGML_LOG_INFO("ggml-ocl: arg%d name=%s extra=%p dev=%p off=%llu nb0=%llu nb1=%llu ne=[%lld %lld] view_offs=%zu\n",
-                              j, t->name, (void *) e, e ? (void *) e->data_device : nullptr,
-                              e ? (unsigned long long) ocl_dev_offset(t, e) : 0ULL,
-                              (unsigned long long) ocl_nb(t, t->nb[0]),
-                              (unsigned long long) ocl_nb(t, t->nb[1]),
-                              (long long) t->ne[0], (long long) t->ne[1], t->view_offs);
+                GGML_LOG_INFO(
+                    "ggml-ocl: arg%d name=%s extra=%p dev=%p off=%llu nb0=%llu nb1=%llu ne=[%lld %lld] view_offs=%zu\n",
+                    j, t->name, (void *) e, e ? (void *) e->data_device : nullptr,
+                    e ? (unsigned long long) ocl_dev_offset(t, e) : 0ULL, (unsigned long long) ocl_nb(t, t->nb[0]),
+                    (unsigned long long) ocl_nb(t, t->nb[1]), (long long) t->ne[0], (long long) t->ne[1], t->view_offs);
             }
             {
                 ggml_ocl_tensor_extra * e = (ggml_ocl_tensor_extra *) node->extra;
@@ -400,8 +434,8 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
                               node->name, (void *) e, e ? (void *) e->data_device : nullptr,
                               e ? (unsigned long long) ocl_dev_offset(node, e) : 0ULL,
                               (unsigned long long) ocl_nb(node, node->nb[0]),
-                              (unsigned long long) ocl_nb(node, node->nb[1]),
-                              (long long) node->ne[0], (long long) node->ne[1]);
+                              (unsigned long long) ocl_nb(node, node->nb[1]), (long long) node->ne[0],
+                              (long long) node->ne[1]);
             }
         }
 
@@ -465,7 +499,7 @@ static void ggml_ocl_device_get_memory(ggml_backend_dev_t dev, size_t * free, si
     ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) dev->context;
 
     *total = dev_ctx->global_mem_size;
-    *free = *total > dev_ctx->mem_allocated ? *total - dev_ctx->mem_allocated : 0;
+    *free  = *total > dev_ctx->mem_allocated ? *total - dev_ctx->mem_allocated : 0;
 }
 
 static enum ggml_backend_dev_type ggml_ocl_device_get_type(ggml_backend_dev_t dev) {
@@ -477,24 +511,24 @@ static void ggml_ocl_device_get_props(ggml_backend_dev_t dev, struct ggml_backen
     props->name        = ggml_ocl_device_get_name(dev);
     props->description = ggml_ocl_device_get_description(dev);
     ggml_ocl_device_get_memory(dev, &props->memory_free, &props->memory_total);
-    props->type = ggml_ocl_device_get_type(dev);
+    props->type      = ggml_ocl_device_get_type(dev);
     props->device_id = nullptr;
 
-    props->caps.async = false;
-    props->caps.host_buffer = false;
+    props->caps.async                = false;
+    props->caps.host_buffer          = false;
     props->caps.buffer_from_host_ptr = false;
-    props->caps.events = false;
+    props->caps.events               = false;
 }
 
 static ggml_backend_t ggml_ocl_device_init(ggml_backend_dev_t dev, const char * params) {
     ggml_ocl_device_context * dev_ctx = (ggml_ocl_device_context *) dev->context;
 
     ggml_ocl_backend * b = new ggml_ocl_backend{};
-    b->caps.device = dev_ctx->device;
+    b->caps.device       = dev_ctx->device;
     ggml_ocl_caps_probe(&b->caps);
     ggml_ocl_caps_print(&b->caps);
 
-    b->context = dev_ctx->context;
+    b->context                              = dev_ctx->context;
     cl_command_queue_properties queue_props = 0;
 #ifdef GGML_OCL_PROFILING
     queue_props |= CL_QUEUE_PROFILING_ENABLE;
@@ -502,13 +536,13 @@ static ggml_backend_t ggml_ocl_device_init(ggml_backend_dev_t dev, const char * 
 
     auto create_queue = [&](cl_command_queue * q, cl_command_queue_properties props) -> cl_int {
         cl_int err = CL_SUCCESS;
-        *q = clCreateCommandQueueWithProperties(b->context, dev_ctx->device, &props, &err);
+        *q         = clCreateCommandQueueWithProperties(b->context, dev_ctx->device, &props, &err);
         if (err == CL_SUCCESS) {
             return err;
         }
 
-        cl_int err_old = CL_SUCCESS;
-        cl_command_queue q_old = clCreateCommandQueue(b->context, dev_ctx->device, props, &err_old);
+        cl_int           err_old = CL_SUCCESS;
+        cl_command_queue q_old   = clCreateCommandQueue(b->context, dev_ctx->device, props, &err_old);
         if (err_old == CL_SUCCESS) {
             *q = q_old;
             return err_old;
@@ -585,8 +619,7 @@ static bool ggml_ocl_device_supports_op(ggml_backend_dev_t dev, const struct ggm
 }
 
 static bool ggml_ocl_device_supports_buft(ggml_backend_dev_t dev, ggml_backend_buffer_type_t buft) {
-    if (dev->iface.get_name != ggml_ocl_device_get_name ||
-        buft->iface.get_name != ggml_ocl_buffer_type_get_name) {
+    if (dev->iface.get_name != ggml_ocl_device_get_name || buft->iface.get_name != ggml_ocl_buffer_type_get_name) {
         return false;
     }
     ggml_ocl_device_context * dev_ctx0 = (ggml_ocl_device_context *) dev->context;
@@ -640,9 +673,9 @@ static struct ggml_backend_reg_i ggml_ocl_reg_interface = {
 };
 
 ggml_backend_reg_t ggml_backend_ocl_reg(void) {
-    static std::mutex mutex;
-    static ggml_backend_reg reg;
-    static bool initialized = false;
+    static std::mutex           mutex;
+    static ggml_backend_reg     reg;
+    static bool                 initialized = false;
     std::lock_guard<std::mutex> lock(mutex);
 
     if (initialized) {
