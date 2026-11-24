@@ -251,6 +251,7 @@ struct ocl_kernel_call {
 
     ocl_arg args[64]      = {};  // 上限 64 参数 (gemv_q4_1 需 33)
     size_t  arg_sizes[64] = {};
+    bool    arg_is_local[64] = {};  // true = 动态 local 内存, 以 NULL 传递
     int     arg_idx       = 0;
 
     void arg_cl_mem(cl_mem v) {
@@ -278,6 +279,15 @@ struct ocl_kernel_call {
         GGML_ASSERT(arg_idx < 64);
         args[arg_idx].i32x4 = v;
         arg_sizes[arg_idx] = sizeof(int32_t) * 4;
+        arg_idx++;
+    }
+
+    // 动态 local 内存: clSetKernelArg 以 (bytes, nullptr) 调用
+    void arg_local(size_t bytes) {
+        GGML_ASSERT(arg_idx < 64);
+        args[arg_idx]       = {};
+        arg_sizes[arg_idx]  = bytes;
+        arg_is_local[arg_idx] = true;
         arg_idx++;
     }
 

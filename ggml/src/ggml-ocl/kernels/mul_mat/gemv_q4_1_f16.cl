@@ -4,6 +4,10 @@
 #define QS4_1     16
 #define BLK_BYTES 20
 
+// rows per subgroup; the host side must use the same value (ROWS_PER_SUBGROUP).
+// small values give more workgroups, which matters when N is only a few thousand.
+#define ROWS      3
+
 kernel void gemv_q4_1_f16(const global char * src0,
                           ulong               offset0,
                           const global char * src1,
@@ -57,96 +61,86 @@ kernel void gemv_q4_1_f16(const global char * src0,
 
     const int warp_id   = get_sub_group_id();
     const int lane_id   = get_sub_group_local_id();
-    const int g_row     = (i0 * get_num_sub_groups() + warp_id) * 3;
+    const int g_row = (i0 * get_num_sub_groups() + warp_id) * ROWS;
     if (g_row >= ne01) {
         return;
     }
 
-    const int row0 = g_row;
-    const int row1 = min(g_row + 1, ne01 - 1);
-    const int row2 = min(g_row + 2, ne01 - 1);
-
-    const global uchar * src0_row0 = (const global uchar *) (src0 + row0 * nb01 + src0_off);
-    const global uchar * src0_row1 = (const global uchar *) (src0 + row1 * nb01 + src0_off);
-    const global uchar * src0_row2 = (const global uchar *) (src0 + row2 * nb01 + src0_off);
+    // per-row state kept as int offsets: 64-bit pointers cost too many registers
+    int row_off[ROWS];
+#pragma unroll
+    for (int r = 0; r < ROWS; ++r) {
+        row_off[r] = min(g_row + r, ne01 - 1) * nb01;
+    }
 
     const global half * src1_ptr = (const global half *) (src1 + i11 * nb12 + i12 * nb13);
-    global half *       dst_ptr  = (global half *)       (dst  + i1  * nb2  + i2  * nb3);
+    global half *       dst_ptr  = (global half *) (dst + i1 * nb2 + i2 * nb3);
+    const global uchar * src0_base = (const global uchar *) src0 + src0_off;
 
     const int qs_total    = blks_per_row * QS4_1;
     const int qs_per_lane = qs_total >> 6;
     int       i           = lane_id * qs_per_lane;
     const int i_end       = i + qs_per_lane;
 
-    // float 累加: 每个 lane 跨多块求和, half 在 K=6144 时误差偏大
-    float sum0 = 0.0f;
-    float sum1 = 0.0f;
-    float sum2 = 0.0f;
+    float sum[ROWS];
+#pragma unroll
+    for (int r = 0; r < ROWS; ++r) {
+        sum[r] = 0.0f;
+    }
 
     while (i < i_end) {
         const int blk  = i / QS4_1;
         const int boff = i % QS4_1;
 
-        const global uchar * b0 = src0_row0 + blk * BLK_BYTES;
-        const global uchar * b1 = src0_row1 + blk * BLK_BYTES;
-        const global uchar * b2 = src0_row2 + blk * BLK_BYTES;
+        const global uchar * blk_base = src0_base + blk * BLK_BYTES;
+        const global half *  x        = src1_ptr + blk * QK4_1;
 
-        const global half * x = src1_ptr + blk * QK4_1;
+        float s = 0.0f;
+        half2 acc[ROWS];
+#pragma unroll
+        for (int r = 0; r < ROWS; ++r) {
+            acc[r] = (half2) (0.0, 0.0);
+        }
 
-        const half2 dm0 = *((const global half2 *) b0);
-        const half2 dm1 = *((const global half2 *) b1);
-        const half2 dm2 = *((const global half2 *) b2);
-
-        float  s    = 0.0;
-        half2 acc0 = (half2) (0.0, 0.0);
-        half2 acc1 = (half2) (0.0, 0.0);
-        half2 acc2 = (half2) (0.0, 0.0);
-
-        const int           chunk = min(QS4_1 - boff, i_end - i);
-        global const uint * w0    = (const global uint *) (&b0[4 + boff]);
-        global const uint * w1    = (const global uint *) (&b1[4 + boff]);
-        global const uint * w2    = (const global uint *) (&b2[4 + boff]);
+        const int chunk = min(QS4_1 - boff, i_end - i);
 
         for (int j = 0; j < (chunk >> 2); ++j) {
-            const uint ww0 = w0[j];
-            const uint ww1 = w1[j];
-            const uint ww2 = w2[j];
+            uint ww[ROWS];
+#pragma unroll
+            for (int r = 0; r < ROWS; ++r) {
+                ww[r] = ((const global uint *) (blk_base + row_off[r] + 4 + boff))[j];
+            }
 #pragma unroll
             for (int q = 0; q < 4; ++q) {
                 const int   k  = (j << 2) + q;
-                const half2 xs = (half2) (x[boff + k], x[boff + QS4_1 + k]);  // 3 行共用, 只取一次
-                s += (float)xs.x;                                                    // 只加一次
-                s += (float)xs.y;
-
-                const uchar p0 = (uchar) (ww0 >> (q << 3));
-                const uchar p1 = (uchar) (ww1 >> (q << 3));
-                const uchar p2 = (uchar) (ww2 >> (q << 3));
-
-                acc0 = fma((half2) ((half) (p0 & 0x0F), (half) (p0 >> 4)), xs, acc0);
-                acc1 = fma((half2) ((half) (p1 & 0x0F), (half) (p1 >> 4)), xs, acc1);
-                acc2 = fma((half2) ((half) (p2 & 0x0F), (half) (p2 >> 4)), xs, acc2);
+                // one activation pair feeds all rows
+                const half2 xs = (half2) (x[boff + k], x[boff + QS4_1 + k]);
+                s += (float) xs.x;
+                s += (float) xs.y;
+#pragma unroll
+                for (int r = 0; r < ROWS; ++r) {
+                    const uchar p = (uchar) (ww[r] >> (q << 3));
+                    acc[r] = fma((half2) ((half) (p & 0x0F), (half) (p >> 4)), xs, acc[r]);
+                }
             }
         }
 
-        sum0 = fma((float) (acc0.x + acc0.y), (float) dm0.x, sum0);
-        sum0 = fma((float) dm0.y, s, sum0);
-
-        sum1 = fma((float) (acc1.x + acc1.y), (float) dm1.x, sum1);
-        sum1 = fma((float) dm1.y, s, sum1);
-
-        sum2 = fma((float) (acc2.x + acc2.y), (float) dm2.x, sum2);
-        sum2 = fma((float) dm2.y, s, sum2);
+#pragma unroll
+        for (int r = 0; r < ROWS; ++r) {
+            const half2 dm = *((const global half2 *) (blk_base + row_off[r]));
+            sum[r] = fma((float) (acc[r].x + acc[r].y), (float) dm.x, sum[r]);
+            sum[r] = fma((float) dm.y, s, sum[r]);
+        }
 
         i += chunk;
     }
 
-    const float2 s01 = (float2) (sum0, sum1);
-    const float2 r01 = sub_group_reduce_add(s01, false, false);
-    const float  r2  = sub_group_reduce_add(sum2);
-
-    if (lane_id == 0) {
-        if (row0 < ne01) { dst_ptr[row0] = (half) r01.s0; }
-        if (row1 < ne01) { dst_ptr[row1] = (half) r01.s1; }
-        if (row2 < ne01) { dst_ptr[row2] = (half) r2; }
+#pragma unroll
+    for (int r = 0; r < ROWS; ++r) {
+        const int   rr  = min(g_row + r, ne01 - 1);
+        const float red = sub_group_reduce_add(sum[r]);
+        if (lane_id == 0 && rr < ne01) {
+            dst_ptr[rr] = (half) red;
+        }
     }
 }

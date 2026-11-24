@@ -8,7 +8,7 @@ namespace ops {
 namespace {
 constexpr int NTH               = 256;  // work-group 大小
 constexpr int SUBGROUP_SIZE     = 64;
-constexpr int ROWS_PER_SUBGROUP = 3;    // 每个 subgroup 处理 3 行
+constexpr int ROWS_PER_SUBGROUP = 3;    // 每个 subgroup 处理 3 行 (与 kernel 的 ROWS 一致)
 constexpr int BLK_K             = 32;   // Q4_1 量化块大小
 constexpr int BLK_BYTES         = 20;   // 每块字节数
 }  // namespace

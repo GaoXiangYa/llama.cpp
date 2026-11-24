@@ -7,7 +7,7 @@ void ocl_kernel_call::enqueue(ggml_ocl_backend * backend, cl_event * evt_out) {
     GGML_ASSERT(kernel != nullptr);
 
     for (int i = 0; i < arg_idx; i++) {
-        OCL_CHECK(clSetKernelArg(kernel, i, arg_sizes[i], &args[i]));
+        OCL_CHECK(clSetKernelArg(kernel, i, arg_sizes[i], arg_is_local[i] ? nullptr : (const void *) &args[i]));
     }
 
 #ifdef GGML_OCL_PROFILING
