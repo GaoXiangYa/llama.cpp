@@ -348,33 +348,11 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
     ocl_exec_wait_pending_copies(b);
     ggml_ocl_dump_graph_leaves(backend, cgraph);
 
-    std::unordered_map<const ggml_tensor *, int32_t> use_cnt;
-    std::unordered_map<const ggml_tensor *, int32_t> only_use;
-    std::unordered_map<const ggml_tensor *, std::vector<int>> consumers;
-
-    for (int i = 0; i < cgraph->n_nodes; ++i) {
-        auto * node = cgraph->nodes[i];
-        for (int j = 0; j < GGML_MAX_SRC; ++j) {
-            const ggml_tensor * s = node->src[j];
-            if (s == nullptr) {
-                continue;
-            }
-            use_cnt[s]++;
-            only_use[s] = i;
-            consumers[s].push_back(i);
-        }
-    }
-
 #ifdef GGML_OCL_PROFILING
     const int64_t prof_t0 = ggml_time_us();
 #endif
-    std::vector<char> skip(cgraph->n_nodes, 0);
     for (int i = 0; i < cgraph->n_nodes; i++) {
         ggml_tensor * node = cgraph->nodes[i];
-
-        if (skip[i]) {
-            continue;
-        }
 
         if (ggml_is_empty(node)) {
             continue;
@@ -393,53 +371,13 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
             continue;
         }
 
-        if (node->op == GGML_OP_ADD) {
-            // find the RMS_NORM node that consumes this add (the add may have several consumers)
-            int rms_idx = -1;
-            auto itc = consumers.find(node);
-            if (itc != consumers.end()) {
-                for (int ci : itc->second) {
-                    ggml_tensor * c = cgraph->nodes[ci];
-                    if (c->op == GGML_OP_RMS_NORM && c->src[0] == node) {
-                        rms_idx = ci;
-                        break;
-                    }
-                }
+        const int n = ops::try_fuse(b, cgraph, i);
+        if (n != 0) {
+            if (ops::fuse_debug()) {
+                GGML_LOG_INFO("ggml-ocl: fused %d nodes at %d (%s)\n", n + 1, i, node->name);
             }
-
-            if (rms_idx >= 0 && use_cnt[node] >= 1) {
-                ggml_tensor * rms_node = cgraph->nodes[rms_idx];
-                auto mul_it = consumers.find(rms_node);
-                if (mul_it != consumers.end() && use_cnt[rms_node] == 1) {
-                    int           mul_idx  = mul_it->second[0];
-                    ggml_tensor * mul_node = cgraph->nodes[mul_idx];
-                    ggml_tensor * w        = mul_node->src[1];
-
-                    const bool ok = mul_node->op == GGML_OP_MUL && mul_node->src[0] == rms_node;
-
-                    if (ok && ops::add_rmsnorm_mul_run(b, node, rms_node, w, mul_node)) {
-                        skip[rms_idx]   = 1;
-                        skip[mul_idx]   = 1;
-                        GGML_LOG_INFO("ggml-ocl: fused %s + RMSNORM %s + MUL %s\n", node->name, rms_node->name,
-                                      mul_node->name);
-                        continue;
-                    }
-                }
-            }
-        }
-
-        if (node->op == GGML_OP_RMS_NORM) {
-            auto uc = use_cnt.find(node);
-            if (uc != use_cnt.end() && uc->second == 1 && use_cnt[node] != 0) {
-                auto * c = cgraph->nodes[only_use[node]];
-                if (c->op == GGML_OP_MUL && c->src[0] == node && c->src[1] != nullptr) {
-                    if (ops::rmsnorm_mul_run(b, node->src[0], c->src[1], c)) {
-                        skip[only_use[node]] = 1;
-                        GGML_LOG_INFO("ggml-ocl: fused %s + MUL %s\n", node->name, c->name);
-                        continue;
-                    }
-                }
-            }
+            i += n;
+            continue;
         }
 
         // 调试: dump 指定节点在执行前的 src/dst 数值 (GGML_OCL_DUMP_BEFORE=<名字子串>)
