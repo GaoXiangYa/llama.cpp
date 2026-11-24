@@ -130,6 +130,31 @@ static void ggml_ocl_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor
         converted = true;
     }
 
+    // Q4_1 weights are repacked into two planes while uploading
+    if (ocl_q4_1_repacked(tensor)) {
+        GGML_ASSERT(offset % 20 == 0 && size % 20 == 0 && "Q4_1 set_tensor must be block aligned");
+
+        const size_t nblk   = size / 20;
+        const size_t b0     = offset / 20;
+        const size_t qbytes = ocl_q4_1_quants_bytes(tensor);
+
+        std::vector<char> q(nblk * 16);
+        std::vector<char> d(nblk * 4);
+        const char *      src = (const char *) data;
+        for (size_t k = 0; k < nblk; k++) {
+            memcpy(q.data() + k * 16, src + k * 20 + 4, 16);  // 16 quant bytes
+            memcpy(d.data() + k * 4, src + k * 20, 4);        // d, m
+        }
+
+        const cl_ulong     base = ocl_dev_offset(tensor, extra);
+        cl_command_queue   cq   = ggml_ocl_buffer_copy_queue(buffer);
+        OCL_CHECK(clEnqueueWriteBuffer(cq, extra->data_device, CL_TRUE, base + b0 * 16, nblk * 16, q.data(), 0,
+                                       nullptr, nullptr));
+        OCL_CHECK(clEnqueueWriteBuffer(cq, extra->data_device, CL_TRUE, base + qbytes + b0 * 4, nblk * 4, d.data(), 0,
+                                       nullptr, nullptr));
+        return;
+    }
+
     cl_ulong    eff_offset = ocl_dev_offset(tensor, extra) + ocl_dev_bytes(tensor, offset);
     cl_event    evt        = nullptr;
     cl_event *  evt_ptr    = backend ? &evt : nullptr;
@@ -153,6 +178,29 @@ static void ggml_ocl_buffer_get_tensor(ggml_backend_buffer_t buffer, const ggml_
     cl_command_queue q          = ggml_ocl_buffer_copy_queue(buffer);
     cl_ulong         eff_offset = ocl_dev_offset(tensor, extra) + ocl_dev_bytes(tensor, offset);
     const size_t     dev_size   = ocl_dev_bytes(tensor, size);
+
+    // undo the two-plane repack when the caller wants the GGUF layout back
+    if (ocl_q4_1_repacked(tensor)) {
+        GGML_ASSERT(offset % 20 == 0 && size % 20 == 0 && "Q4_1 get_tensor must be block aligned");
+
+        const size_t nblk   = size / 20;
+        const size_t b0     = offset / 20;
+        const size_t qbytes = ocl_q4_1_quants_bytes(tensor);
+
+        std::vector<char> qb(nblk * 16);
+        std::vector<char> db(nblk * 4);
+        OCL_CHECK(clEnqueueReadBuffer(q, extra->data_device, CL_TRUE, eff_offset + b0 * 16, nblk * 16, qb.data(), 0,
+                                      nullptr, nullptr));
+        OCL_CHECK(clEnqueueReadBuffer(q, extra->data_device, CL_TRUE, eff_offset + qbytes + b0 * 4, nblk * 4, db.data(),
+                                      0, nullptr, nullptr));
+
+        char * dst = (char *) data;
+        for (size_t k = 0; k < nblk; k++) {
+            memcpy(dst + k * 20, db.data() + k * 4, 4);
+            memcpy(dst + k * 20 + 4, qb.data() + k * 16, 16);
+        }
+        return;
+    }
 
     if (ocl_f16_packed(tensor)) {
         GGML_ASSERT(size % sizeof(float) == 0);

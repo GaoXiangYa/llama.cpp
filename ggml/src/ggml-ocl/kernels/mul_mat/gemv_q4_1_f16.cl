@@ -66,11 +66,17 @@ kernel void gemv_q4_1_f16(const global char * src0,
         return;
     }
 
-    // per-row state kept as int offsets: 64-bit pointers cost too many registers
-    int row_off[ROWS];
+    // repacked layout: [ quants: ne01*bpr*16 ][ dm: ne01*bpr*4 ]
+    const int          bpr          = blks_per_row;
+    const int          quants_bytes = ne01 * bpr * 16;
+
+    int row_q_off[ROWS];   // quants byte offset of this row
+    int row_dm_off[ROWS];  // dm byte offset of this row
 #pragma unroll
     for (int r = 0; r < ROWS; ++r) {
-        row_off[r] = min(g_row + r, ne01 - 1) * nb01;
+        const int rr = min(g_row + r, ne01 - 1);
+        row_q_off[r]  = rr * bpr * 16;
+        row_dm_off[r] = quants_bytes + rr * bpr * 4;
     }
 
     const global half * src1_ptr = (const global half *) (src1 + i11 * nb12 + i12 * nb13);
@@ -92,8 +98,7 @@ kernel void gemv_q4_1_f16(const global char * src0,
         const int blk  = i / QS4_1;
         const int boff = i % QS4_1;
 
-        const global uchar * blk_base = src0_base + blk * BLK_BYTES;
-        const global half *  x        = src1_ptr + blk * QK4_1;
+        const global half * x = src1_ptr + blk * QK4_1;
 
         float s = 0.0f;
         half2 acc[ROWS];
@@ -104,16 +109,42 @@ kernel void gemv_q4_1_f16(const global char * src0,
 
         const int chunk = min(QS4_1 - boff, i_end - i);
 
-        for (int j = 0; j < (chunk >> 2); ++j) {
+        // quants plane is 16-byte aligned per block, so 8-byte vector loads are safe
+        int j = 0;
+        for (; j + 8 <= chunk; j += 8) {
+            uint2 w2[ROWS];
+#pragma unroll
+            for (int r = 0; r < ROWS; ++r) {
+                w2[r] = *(const global uint2 *) (src0_base + row_q_off[r] + i + j);
+            }
+#pragma unroll
+            for (int h = 0; h < 2; ++h) {
+#pragma unroll
+                for (int q = 0; q < 4; ++q) {
+                    const int   k  = j + h * 4 + q;
+                    // one activation pair feeds all rows
+                    const half2 xs = (half2) (x[boff + k], x[boff + QS4_1 + k]);
+                    s += (float) xs.x;
+                    s += (float) xs.y;
+#pragma unroll
+                    for (int r = 0; r < ROWS; ++r) {
+                        const uint  w = h ? w2[r].y : w2[r].x;
+                        const uchar p = (uchar) (w >> (q << 3));
+                        acc[r] = fma((half2) ((half) (p & 0x0F), (half) (p >> 4)), xs, acc[r]);
+                    }
+                }
+            }
+        }
+        // scalar tail for shapes whose per-lane slice is not a multiple of 8 bytes
+        for (; j + 4 <= chunk; j += 4) {
             uint ww[ROWS];
 #pragma unroll
             for (int r = 0; r < ROWS; ++r) {
-                ww[r] = ((const global uint *) (blk_base + row_off[r] + 4 + boff))[j];
+                ww[r] = *(const global uint *) (src0_base + row_q_off[r] + i + j);
             }
 #pragma unroll
             for (int q = 0; q < 4; ++q) {
-                const int   k  = (j << 2) + q;
-                // one activation pair feeds all rows
+                const int   k  = j + q;
                 const half2 xs = (half2) (x[boff + k], x[boff + QS4_1 + k]);
                 s += (float) xs.x;
                 s += (float) xs.y;
@@ -127,7 +158,7 @@ kernel void gemv_q4_1_f16(const global char * src0,
 
 #pragma unroll
         for (int r = 0; r < ROWS; ++r) {
-            const half2 dm = *((const global half2 *) (blk_base + row_off[r]));
+            const half2 dm = *((const global half2 *) (src0_base + row_dm_off[r] + blk * 4));
             sum[r] = fma((float) (acc[r].x + acc[r].y), (float) dm.x, sum[r]);
             sum[r] = fma((float) dm.y, s, sum[r]);
         }

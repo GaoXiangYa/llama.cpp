@@ -155,6 +155,26 @@ static inline size_t ocl_dev_bytes(const ggml_tensor * t, size_t n) {
 }
 
 // 传给 kernel 的步长: half 存放时 F32 张量的 nb[] 减半
+// ---------------------------------------------------------------------------
+// Q4_1 weight repack: on device every Q4_1 tensor is stored as two planes
+//   [ quants: nblk * 16 bytes ][ dm: nblk * 4 bytes ]
+// with block index i = row * blocks_per_row + block. Total size is unchanged
+// (16 + 4 = 20 bytes per block), but every quants block is now 16-byte aligned,
+// so the kernels can use vector loads.
+// GGML_OCL_Q4_1_REPACK=0 disables it (the device then holds the GGUF layout).
+// ---------------------------------------------------------------------------
+static inline bool ocl_q4_1_repacked(const ggml_tensor * t) {
+    return t->type == GGML_TYPE_Q4_1;
+}
+
+static inline size_t ocl_q4_1_nblk(const ggml_tensor * t) {
+    return (size_t) ggml_nelements(t) / 32;  // 32 values per Q4_1 block
+}
+
+static inline size_t ocl_q4_1_quants_bytes(const ggml_tensor * t) {
+    return ocl_q4_1_nblk(t) * 16;
+}
+
 static inline cl_int ocl_nb(const ggml_tensor * t, size_t nb) {
     return (cl_int) (ocl_f16_packed(t) ? (nb >> 1) : nb);
 }

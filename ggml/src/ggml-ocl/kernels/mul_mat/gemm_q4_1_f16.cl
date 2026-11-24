@@ -86,30 +86,39 @@ kernel void gemm_q4_1_f16(global uchar * src0,
     const int acol = lid;  // 0..BN-1
 
     // TN/4 float4 per row: TN columns split into 4-wide halves
-    float4 acc[TM][TN / 4];
+    float4 acc[TM][(TN >> 2)];
 #pragma unroll
     for (int r = 0; r < TM; ++r) {
 #pragma unroll
-        for (int h = 0; h < TN / 4; ++h) {
+        for (int h = 0; h < (TN >> 2); ++h) {
             acc[r][h] = (float4) (0.0f);
         }
     }
+
+    // repacked layout: [ quants: ne01*bpr*16 ][ dm: ne01*bpr*4 ]
+    const int bpr_repack          = ne00 >> 5;
+    const int quants_bytes_repack = (ne01 * bpr_repack) << 4;
 
     for (int k = 0; k < ne00; k += BK) {
         // weights: dequantize half of a Q4_1 block (d, m, 16 quant bytes) into BK floats
         {
             const int gcol = group_col * BN + acol;
             if (gcol < ne01) {
-                const global uchar * blk = src0 + gcol * nb01 + i01 * nb02 + i02 * nb03 + (k >> 5) * nb00;
-                const float2 dm = vload_half2(0, (const global half *) blk);
+                const global uchar * qrow = src0 + i01 * nb02 + i02 * nb03 + gcol * (bpr_repack * 16) +
+                                            (k >> 5) * 16;
+                const global uchar * drow = src0 + i01 * nb02 + i02 * nb03 + quants_bytes_repack +
+                                            gcol * (bpr_repack << 2) + (k >> 5) * 4;
+                const float2 dm = vload_half2(0, (const global half *) drow);
                 const float dd = dm.x;
                 const float mm = dm.y;
 
                 // BK=16 covers half of a Q4_1 block: k/16 selects the nibble
                 const int is_high = (k >> 4) & 1;
+                // quants plane is 16-byte aligned: read the whole block with one vector load
+                const uint4 q4 = *(const global uint4 *) qrow;
 #pragma unroll
                 for (int j = 0; j < 4; ++j) {
-                    const uint w = *(const global uint *) (blk + 4 + j * 4);  // 4 bytes = 8 values
+                    const uint w = (j == 0) ? q4.s0 : (j == 1) ? q4.s1 : (j == 2) ? q4.s2 : q4.s3;
 #pragma unroll
                     for (int t = 0; t < 4; ++t) {
                         const uchar b    = (uchar) ((w >> (8 * t)) & 0xFF);
