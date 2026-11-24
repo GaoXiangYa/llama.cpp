@@ -350,6 +350,7 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
 
     std::unordered_map<const ggml_tensor *, int32_t> use_cnt;
     std::unordered_map<const ggml_tensor *, int32_t> only_use;
+    std::unordered_map<const ggml_tensor *, std::vector<int>> consumers;
 
     for (int i = 0; i < cgraph->n_nodes; ++i) {
         auto * node = cgraph->nodes[i];
@@ -360,6 +361,7 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
             }
             use_cnt[s]++;
             only_use[s] = i;
+            consumers[s].push_back(i);
         }
     }
 
@@ -389,6 +391,41 @@ static ggml_status ggml_ocl_backend_graph_compute(ggml_backend_t backend, ggml_c
         }
         if ((node->flags & GGML_TENSOR_FLAG_COMPUTE) == 0) {
             continue;
+        }
+
+        if (node->op == GGML_OP_ADD) {
+            // find the RMS_NORM node that consumes this add (the add may have several consumers)
+            int rms_idx = -1;
+            auto itc = consumers.find(node);
+            if (itc != consumers.end()) {
+                for (int ci : itc->second) {
+                    ggml_tensor * c = cgraph->nodes[ci];
+                    if (c->op == GGML_OP_RMS_NORM && c->src[0] == node) {
+                        rms_idx = ci;
+                        break;
+                    }
+                }
+            }
+
+            if (rms_idx >= 0 && use_cnt[node] >= 1) {
+                ggml_tensor * rms_node = cgraph->nodes[rms_idx];
+                auto mul_it = consumers.find(rms_node);
+                if (mul_it != consumers.end() && use_cnt[rms_node] == 1) {
+                    int           mul_idx  = mul_it->second[0];
+                    ggml_tensor * mul_node = cgraph->nodes[mul_idx];
+                    ggml_tensor * w        = mul_node->src[1];
+
+                    const bool ok = mul_node->op == GGML_OP_MUL && mul_node->src[0] == rms_node;
+
+                    if (ok && ops::add_rmsnorm_mul_run(b, node, rms_node, w, mul_node)) {
+                        skip[rms_idx]   = 1;
+                        skip[mul_idx]   = 1;
+                        GGML_LOG_INFO("ggml-ocl: fused %s + RMSNORM %s + MUL %s\n", node->name, rms_node->name,
+                                      mul_node->name);
+                        continue;
+                    }
+                }
+            }
         }
 
         if (node->op == GGML_OP_RMS_NORM) {

@@ -42,6 +42,7 @@ set(GGML_OCL_KERNELS
     cpy/cpy
     rope/rope
     add/kernel_add_f16
+    add/add_rmsnorm_mul_f16
     mul/mul_f16
     glu/swiglu_f16
     rmsnorm/rmsnorm_f16

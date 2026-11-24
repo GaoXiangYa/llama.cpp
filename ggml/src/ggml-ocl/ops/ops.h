@@ -1,11 +1,14 @@
 #pragma once
 
 #include "ggml-ocl-internal.h"
+#include "ggml.h"
 
 namespace ops {
 
 bool add_supports(const ggml_ocl_caps * caps, const ggml_tensor * op);
 bool add_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst);
+bool add_rmsnorm_mul_run(ggml_ocl_backend * b, const ggml_tensor * add, const ggml_tensor * norm,
+                         const ggml_tensor * w, ggml_tensor * out);
 
 bool cpy_supports(const ggml_ocl_caps * caps, const ggml_tensor * op);
 bool cpy_run(ggml_ocl_backend * b, const ggml_tensor * s0, const ggml_tensor * s1, ggml_tensor * dst);
